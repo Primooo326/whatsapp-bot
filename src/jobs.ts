@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { Client, Chat } from 'whatsapp-web.js';
+import moment from 'moment-timezone';
 
 // Interfaces
 interface JobConfig {
@@ -20,11 +21,24 @@ abstract class BaseJob {
     protected phoneNumber: string;
     protected message: string;
     protected client: Client;
+    protected readonly TARGET_TIMEZONE = "America/Bogota";
+
+    protected convertToTargetTimezone(date: Date): moment.Moment {
+        return moment(date).tz(this.TARGET_TIMEZONE);
+    }
 
     constructor(client: Client, phoneNumber: string, message: string) {
         this.client = client;
-        this.phoneNumber = phoneNumber;
+        this.phoneNumber = this.validatePhoneNumber(phoneNumber);
         this.message = message;
+    }
+
+    private validatePhoneNumber(phone: string): string {
+        const cleanPhone = phone.replace(/\D/g, '');
+        if (!/^57\d{10}$/.test(cleanPhone)) {
+            throw new Error('Número de teléfono inválido. Debe ser un número colombiano válido.');
+        }
+        return cleanPhone;
     }
 
     async execute(): Promise<void> {
@@ -32,9 +46,9 @@ abstract class BaseJob {
             const chatId = this.phoneNumber + "@c.us";
             const chat: Chat = await this.client.getChatById(chatId);
             await chat.sendMessage(this.message);
-            console.log(`Mensaje enviado a ${this.phoneNumber}: ${this.message}`);
+            console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Mensaje enviado a ${this.phoneNumber}: ${this.message}`);
         } catch (error) {
-            console.error('Error al ejecutar job:', error);
+            console.error(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Error al ejecutar job:`, error);
         }
     }
 
@@ -43,15 +57,23 @@ abstract class BaseJob {
 
 // Job para mensajes únicos
 class OneTimeJob extends BaseJob {
-    private date: Date;
+    private date: moment.Moment;
 
     constructor(client: Client, phoneNumber: string, message: string, date: string) {
         super(client, phoneNumber, message);
-        this.date = new Date(date);
+        this.date = moment.tz(date, this.TARGET_TIMEZONE);
+
+        if (!this.date.isValid()) {
+            throw new Error('Fecha inválida');
+        }
+
+        if (this.date.isBefore(moment())) {
+            throw new Error('La fecha debe ser futura');
+        }
     }
 
     getCronExpression(): string {
-        return `${this.date.getMinutes()} ${this.date.getHours()} ${this.date.getDate()} ${this.date.getMonth() + 1} *`;
+        return `${this.date.minutes()} ${this.date.hours()} ${this.date.date()} ${this.date.month() + 1} *`;
     }
 }
 
@@ -61,6 +83,11 @@ class RecurringJob extends BaseJob {
 
     constructor(client: Client, phoneNumber: string, message: string, cronExpression: string) {
         super(client, phoneNumber, message);
+
+        if (!cron.validate(cronExpression)) {
+            throw new Error('Expresión cron inválida');
+        }
+
         this.cronExpression = cronExpression;
     }
 
@@ -72,15 +99,20 @@ class RecurringJob extends BaseJob {
 // Factory para crear jobs
 class JobFactory {
     static createJob(type: 'oneTime' | 'recurring', config: JobConfig): BaseJob {
-        switch (type) {
-            case 'oneTime':
-                if (!config.date) throw new Error('Date is required for oneTime jobs');
-                return new OneTimeJob(config.client, config.phoneNumber, config.message, config.date);
-            case 'recurring':
-                if (!config.cronExpression) throw new Error('Cron expression is required for recurring jobs');
-                return new RecurringJob(config.client, config.phoneNumber, config.message, config.cronExpression);
-            default:
-                throw new Error('Tipo de job no válido');
+        try {
+            switch (type) {
+                case 'oneTime':
+                    if (!config.date) throw new Error('Se requiere fecha para trabajos únicos');
+                    return new OneTimeJob(config.client, config.phoneNumber, config.message, config.date);
+                case 'recurring':
+                    if (!config.cronExpression) throw new Error('Se requiere expresión cron para trabajos recurrentes');
+                    return new RecurringJob(config.client, config.phoneNumber, config.message, config.cronExpression);
+                default:
+                    throw new Error('Tipo de job no válido');
+            }
+        } catch (error) {
+            console.error('Error al crear job:', error);
+            throw error;
         }
     }
 }
@@ -88,25 +120,37 @@ class JobFactory {
 // Scheduler para manejar los jobs
 class JobScheduler {
     private jobs: Map<string, JobData>;
+    private readonly TARGET_TIMEZONE = "America/Bogota";
 
     constructor() {
         this.jobs = new Map();
     }
 
     scheduleJob(jobId: string, job: BaseJob): string {
-        const task = cron.schedule(job.getCronExpression(), () => {
-            job.execute();
-        }, {
-            scheduled: true,
-            timezone: "America/Bogota"
-        });
+        try {
+            const cronExpression = job.getCronExpression();
+            console.log({
+                jobId,
+                cronExpression,
+                serverTime: new Date().toISOString(),
+                bogotaTime: moment().tz(this.TARGET_TIMEZONE).format(),
+                serverTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            });
 
-        this.jobs.set(jobId, {
-            job,
-            task
-        });
+            const task = cron.schedule(cronExpression, () => {
+                console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Ejecutando trabajo ${jobId}`);
+                job.execute();
+            }, {
+                scheduled: true,
+                timezone: this.TARGET_TIMEZONE
+            });
 
-        return jobId;
+            this.jobs.set(jobId, { job, task });
+            return jobId;
+        } catch (error) {
+            console.error(`Error al programar job ${jobId}:`, error);
+            throw error;
+        }
     }
 
     stopJob(jobId: string): boolean {
@@ -114,6 +158,7 @@ class JobScheduler {
         if (jobData) {
             jobData.task.stop();
             this.jobs.delete(jobId);
+            console.log(`Job ${jobId} detenido a las ${moment().tz(this.TARGET_TIMEZONE).format()}`);
             return true;
         }
         return false;
@@ -143,36 +188,43 @@ class JobManager {
             console.log(`Job ${jobId} programado exitosamente`);
         } catch (error) {
             console.error('Error al programar job:', error);
+            throw error;
         }
     }
 
     stopSpecificJob(jobId: string): void {
         const stopped = this.scheduler.stopJob(jobId);
-        console.log(stopped ? `Job ${jobId} detenido` : `Job ${jobId} no encontrado`);
+        if (!stopped) {
+            console.log(`Job ${jobId} no encontrado`);
+        }
     }
 
-    getJobInfo(jobId: string): void {
-        const jobData = this.scheduler.getJob(jobId);
-        console.log(jobData ? jobData : `Job ${jobId} no encontrado`);
+    getJobInfo(jobId: string): JobData | undefined {
+        return this.scheduler.getJob(jobId);
     }
 
-    listAllJobs(): void {
-        const jobs = this.scheduler.getAllJobs();
-        console.log('Jobs activos:', jobs);
+    listAllJobs(): [string, JobData][] {
+        return this.scheduler.getAllJobs();
     }
 }
 
+export {
+    JobManager,
+    JobConfig,
+    JobData,
+    initializeJobs,
+
+};
 // Ejemplo de uso
 const initializeJobs = (client: Client): JobManager => {
     const jobManager = new JobManager();
-    const futureDate = new Date();
-    futureDate.setMinutes(futureDate.getMinutes() + 2);
+
     // Configuración de mensajes únicos
     const oneTimeConfig: JobConfig = {
         client,
         phoneNumber: "573046282936",
         message: "Este es un mensaje único programado de prueba",
-        date: futureDate.toISOString()
+        date: moment().add(5, 'minutes').format()
     };
     jobManager.createAndScheduleJob('oneTime', oneTimeConfig, 'mensaje-unico-1');
 
@@ -181,7 +233,7 @@ const initializeJobs = (client: Client): JobManager => {
         client,
         phoneNumber: "573046282936",
         message: "Este es un mensaje de preuba programado cada 5 minutos",
-        cronExpression: '*/5 * * * *' // Cada 5 minutos
+        cronExpression: '0 */5 * * * *' // Cada 5 minutos 
     };
     jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');
     // Configuración de mensajes diarios
@@ -195,13 +247,4 @@ const initializeJobs = (client: Client): JobManager => {
 
 
     return jobManager;
-};
-
-export {
-    JobFactory,
-    JobScheduler,
-    JobManager,
-    initializeJobs,
-    type JobConfig,
-    type JobData
 };

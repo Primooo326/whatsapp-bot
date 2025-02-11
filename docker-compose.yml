@@ -10,4 +10,5 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=production
+      - TZ=America/Bogota
       # Agrega otras variables de entorno según necesites
