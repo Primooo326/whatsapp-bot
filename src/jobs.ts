@@ -165,13 +165,14 @@ class JobManager {
 // Ejemplo de uso
 const initializeJobs = (client: Client): JobManager => {
     const jobManager = new JobManager();
-
+    const futureDate = new Date();
+    futureDate.setMinutes(futureDate.getMinutes() + 2);
     // Configuración de mensajes únicos
     const oneTimeConfig: JobConfig = {
         client,
         phoneNumber: "573046282936",
         message: "Este es un mensaje único programado de prueba",
-        date: new Date().setMinutes(new Date().getMinutes() + 5).toLocaleString()
+        date: futureDate.toISOString()
     };
     jobManager.createAndScheduleJob('oneTime', oneTimeConfig, 'mensaje-unico-1');
 
