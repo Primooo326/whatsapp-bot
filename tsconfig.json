@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "CommonJS",
+    "baseUrl": "./src",
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@models/*": [
+        "./models/*"
+      ],
+      "@api/*": [
+        "./api/*"
+      ],
+      "@controllers/*": [
+        "./controllers/*"
+      ],
+      "@routes/*": [
+        "./routes/*"
+      ],
+      "@utils/*": [
+        "./utils/*"
+      ]
+    },
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "sourceMap": true
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
