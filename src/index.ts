@@ -1,7 +1,7 @@
 import qrcode from 'qrcode-terminal';
 import { Client, LocalAuth } from 'whatsapp-web.js';
-import { getUser } from '@api/user.api';
-import { getMenu } from '@api/menu.api';
+// import { getUser } from '@api/user.api';
+// import { getMenu } from '@api/menu.api';
 import { initializeJobs, JobManager } from './jobs';
 // Configuración del cliente
 const client = new Client({
@@ -42,6 +42,8 @@ client.on('ready', () => {
     console.log('El cliente está listo para usar');
     jobManager = initializeJobs(client);
 
+    jobManager.listAllJobs();
+
     const currentDate = new Date()
     sendMessage(client.info.wid._serialized, `[${currentDate.toLocaleString()}] El cliente está listo para usar`)
 
@@ -71,11 +73,11 @@ const sendMessage = async (id: string, message: string) => {
 
 }
 
-const getContact = async (phone: string) => {
-    try {
-        const user = await getUser(phone);
-        return user.ok ? user : null;
-    } catch (error) {
-        return null;
-    }
-}
+// const getContact = async (phone: string) => {
+//     try {
+//         const user = await getUser(phone);
+//         return user.ok ? user : null;
+//     } catch (error) {
+//         return null;
+//     }
+// }
