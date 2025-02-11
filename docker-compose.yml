@@ -1,0 +1,11 @@
+services:
+  nodejs-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./logs:/app/logs # Para logs si los necesitas
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      # Agrega otras variables de entorno según necesites
