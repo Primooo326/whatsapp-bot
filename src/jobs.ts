@@ -171,7 +171,7 @@ const initializeJobs = (client: Client): JobManager => {
         client,
         phoneNumber: "573046282936",
         message: "Este es un mensaje único programado de prueba",
-        date: new Date().setMinutes(new Date().getMinutes() + 1).toLocaleString()
+        date: new Date().setMinutes(new Date().getMinutes() + 5).toLocaleString()
     };
     jobManager.createAndScheduleJob('oneTime', oneTimeConfig, 'mensaje-unico-1');
 
@@ -180,7 +180,7 @@ const initializeJobs = (client: Client): JobManager => {
         client,
         phoneNumber: "573046282936",
         message: "Este es un mensaje de preuba programado cada 5 minutos",
-        cronExpression: '/5 * * * *' // Cada 5 minutos
+        cronExpression: '*/5 * * * *' // Cada 5 minutos
     };
     jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');
     // Configuración de mensajes diarios
