@@ -2,7 +2,7 @@ import qrcode from 'qrcode-terminal';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import { getUser } from '@api/user.api';
 import { getMenu } from '@api/menu.api';
-
+import { initializeJobs, JobManager } from './jobs';
 // Configuración del cliente
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -20,7 +20,7 @@ const client = new Client({
         ]
     }
 });
-
+let jobManager: JobManager
 // Evento QR
 client.on('qr', (qr) => {
     console.log('Escanea este código QR con tu WhatsApp:');
@@ -40,6 +40,11 @@ client.on('auth_failure', (msg) => {
 // Evento cuando el cliente está listo
 client.on('ready', () => {
     console.log('El cliente está listo para usar');
+    jobManager = initializeJobs(client);
+
+    const currentDate = new Date()
+    sendMessage(client.info.wid._serialized, `[${currentDate.toLocaleString()}] El cliente está listo para usar`)
+
 });
 
 // Manejo de mensajes
@@ -47,32 +52,18 @@ client.on('message', async (message) => {
     console.log('Mensaje recibido:', message.body);
 
     const contact = await message.getChat();
-
     console.log(contact);
 
-    const user = await getUser(contact.id._serialized);
+    if (contact.id.user === "573208471126") {
 
-    console.log(user);
-
-    if (user.ok) {
-        const menu = await getMenu()
-        for (const item of menu) {
-            const bodyHtml = `<b>${item.nombre_plato}</b><br/>${item.descripcion}<br/>${item.precio}`;
-            client.sendMessage(contact.id._serialized, bodyHtml);
-        }
-    } else {
-
-        const bodyMessage = "No te encuentras registrado, por favor dame tu nombre, numero de teléfono y dirección para poder continuar.";
-        client.sendMessage(contact.id._serialized, bodyMessage);
     }
-
-    sendMessage(contact.id._serialized, 'xd');
 
     if (message.body === '!ping') {
         message.reply('pong');
     }
 });
 
+client.initialize();
 
 const sendMessage = async (id: string, message: string) => {
 
@@ -80,5 +71,11 @@ const sendMessage = async (id: string, message: string) => {
 
 }
 
-// Inicializar el cliente
-client.initialize();
+const getContact = async (phone: string) => {
+    try {
+        const user = await getUser(phone);
+        return user.ok ? user : null;
+    } catch (error) {
+        return null;
+    }
+}
