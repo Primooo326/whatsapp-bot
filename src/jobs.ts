@@ -6,7 +6,7 @@ import { romeo } from './api/ollama.api';
 // Interfaces
 interface JobConfig {
     client: Client;
-    phoneNumber: string;
+    phoneNumbers: string[];  // Ahora es un array de números
     message: string | (() => Promise<string>);
     date?: string;
     cronExpression?: string;
@@ -19,27 +19,32 @@ interface JobData {
 
 // Clase base para los jobs
 abstract class BaseJob {
-    protected phoneNumber: string;
+    protected phoneNumbers: string[];  // Ahora es un array
     protected message: string | (() => Promise<string>);
     protected client: Client;
     protected readonly TARGET_TIMEZONE = "America/Bogota";
+    protected active: boolean = true;
+
 
     protected convertToTargetTimezone(date: Date): moment.Moment {
         return moment(date).tz(this.TARGET_TIMEZONE);
     }
 
-    constructor(client: Client, phoneNumber: string, message: string | (() => Promise<string>)) {
+    constructor(client: Client, phoneNumbers: string[], message: string | (() => Promise<string>)) {
         this.client = client;
-        this.phoneNumber = this.validatePhoneNumber(phoneNumber);
+        this.phoneNumbers = this.validatePhoneNumbers(phoneNumbers);
         this.message = message;
     }
 
-    private validatePhoneNumber(phone: string): string {
-        const cleanPhone = phone.replace(/\D/g, '');
-        if (!/^57\d{10}$/.test(cleanPhone)) {
-            throw new Error('Número de teléfono inválido. Debe ser un número colombiano válido.');
-        }
-        return cleanPhone;
+    private validatePhoneNumbers(phones: string[]): string[] {
+        return phones.map(phone => {
+            const cleanPhone = phone.replace(/\D/g, '');
+            // Validación más flexible que acepta números de cualquier país
+            if (!/^\d{10,15}$/.test(cleanPhone)) {
+                throw new Error(`Número inválido: ${phone}. Debe tener entre 10 y 15 dígitos.`);
+            }
+            return cleanPhone;
+        });
     }
 
     private async getMessageContent(): Promise<string> {
@@ -52,10 +57,18 @@ abstract class BaseJob {
     async execute(): Promise<void> {
         try {
             const messageContent = await this.getMessageContent();
-            const chatId = this.phoneNumber + "@c.us";
-            const chat: Chat = await this.client.getChatById(chatId);
-            await chat.sendMessage(messageContent);
-            console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Mensaje enviado a ${this.phoneNumber}: ${messageContent}`);
+
+            // Enviar mensaje a todos los números en el array
+            for (const phoneNumber of this.phoneNumbers) {
+                try {
+                    const chatId = phoneNumber + "@c.us";
+                    const chat: Chat = await this.client.getChatById(chatId);
+                    await chat.sendMessage(messageContent);
+                    console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Mensaje enviado a ${phoneNumber}: ${messageContent}`);
+                } catch (error) {
+                    console.error(`Error al enviar mensaje a ${phoneNumber}:`, error);
+                }
+            }
         } catch (error) {
             console.error(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Error al ejecutar job:`, error);
         }
@@ -63,28 +76,39 @@ abstract class BaseJob {
 
     abstract getCronExpression(): string;
 
+    isActive(): boolean {
+        return this.active;
+    }
+
+    setActive(status: boolean): void {
+        this.active = status;
+    }
+
     get getJobInfo(): {
-        phoneNumber: string;
+        phoneNumbers: string[];
         message: string | (() => Promise<string>);
         timezone: string;
         currentTime: string;
+        date?: string;           // Para OneTimeJob
+        cronExpression?: string; // Para RecurringJob
+        active: boolean;         // Nuevo campo
     } {
         return {
-            phoneNumber: this.phoneNumber,
+            phoneNumbers: this.phoneNumbers,
             message: this.message,
             timezone: this.TARGET_TIMEZONE,
-            currentTime: moment().tz(this.TARGET_TIMEZONE).format()
+            currentTime: moment().tz(this.TARGET_TIMEZONE).format(),
+            active: this.active
         };
     }
-
 }
 
 // Job para mensajes únicos
 class OneTimeJob extends BaseJob {
     private date: moment.Moment;
 
-    constructor(client: Client, phoneNumber: string, message: string | (() => Promise<string>), date: string) {
-        super(client, phoneNumber, message);
+    constructor(client: Client, phoneNumbers: string[], message: string | (() => Promise<string>), date: string) {
+        super(client, phoneNumbers, message);
         this.date = moment.tz(date, this.TARGET_TIMEZONE);
 
         if (!this.date.isValid()) {
@@ -99,14 +123,21 @@ class OneTimeJob extends BaseJob {
     getCronExpression(): string {
         return `${this.date.minutes()} ${this.date.hours()} ${this.date.date()} ${this.date.month() + 1} *`;
     }
+
+    get getJobInfo() {
+        return {
+            ...super.getJobInfo,
+            date: this.date.format(),  // Solo incluimos la fecha para OneTimeJob
+            type: 'oneTime' as const
+        };
+    }
 }
 
-// Job para mensajes recurrentes
 class RecurringJob extends BaseJob {
     private cronExpression: string;
 
-    constructor(client: Client, phoneNumber: string, message: string | (() => Promise<string>), cronExpression: string) {
-        super(client, phoneNumber, message);
+    constructor(client: Client, phoneNumbers: string[], message: string | (() => Promise<string>), cronExpression: string) {
+        super(client, phoneNumbers, message);
 
         if (!cron.validate(cronExpression)) {
             throw new Error('Expresión cron inválida');
@@ -118,6 +149,14 @@ class RecurringJob extends BaseJob {
     getCronExpression(): string {
         return this.cronExpression;
     }
+
+    get getJobInfo() {
+        return {
+            ...super.getJobInfo,
+            cronExpression: this.cronExpression,  // Solo incluimos cronExpression para RecurringJob
+            type: 'recurring' as const
+        };
+    }
 }
 
 // Factory para crear jobs
@@ -126,11 +165,33 @@ class JobFactory {
         try {
             switch (type) {
                 case 'oneTime':
-                    if (!config.date) throw new Error('Se requiere fecha para trabajos únicos');
-                    return new OneTimeJob(config.client, config.phoneNumber, config.message, config.date);
+                    if (!config.date) {
+                        throw new Error('Se requiere fecha para trabajos únicos');
+                    }
+                    if (!config.phoneNumbers || config.phoneNumbers.length === 0) {
+                        throw new Error('Se requiere al menos un número de teléfono');
+                    }
+                    return new OneTimeJob(
+                        config.client,
+                        config.phoneNumbers,
+                        config.message,
+                        config.date
+                    );
+
                 case 'recurring':
-                    if (!config.cronExpression) throw new Error('Se requiere expresión cron para trabajos recurrentes');
-                    return new RecurringJob(config.client, config.phoneNumber, config.message, config.cronExpression);
+                    if (!config.cronExpression) {
+                        throw new Error('Se requiere expresión cron para trabajos recurrentes');
+                    }
+                    if (!config.phoneNumbers || config.phoneNumbers.length === 0) {
+                        throw new Error('Se requiere al menos un número de teléfono');
+                    }
+                    return new RecurringJob(
+                        config.client,
+                        config.phoneNumbers,
+                        config.message,
+                        config.cronExpression
+                    );
+
                 default:
                     throw new Error('Tipo de job no válido');
             }
@@ -153,17 +214,15 @@ class JobScheduler {
     scheduleJob(jobId: string, job: BaseJob): string {
         try {
             const cronExpression = job.getCronExpression();
-            console.log({
-                jobId,
-                cronExpression,
-                serverTime: new Date().toISOString(),
-                bogotaTime: moment().tz(this.TARGET_TIMEZONE).format(),
-                serverTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-            });
 
-            const task = cron.schedule(cronExpression, () => {
-                console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Ejecutando trabajo ${jobId}`);
-                job.execute();
+            const task = cron.schedule(cronExpression, async () => {
+                const jobData = this.jobs.get(jobId);
+                if (jobData && jobData.job.isActive()) {
+                    console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Ejecutando trabajo ${jobId}`);
+                    await job.execute();
+                } else {
+                    console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Job ${jobId} está inactivo, saltando ejecución`);
+                }
             }, {
                 scheduled: true,
                 timezone: this.TARGET_TIMEZONE
@@ -181,8 +240,32 @@ class JobScheduler {
         const jobData = this.jobs.get(jobId);
         if (jobData) {
             jobData.task.stop();
-            this.jobs.delete(jobId);
+            jobData.job.setActive(false);
             console.log(`Job ${jobId} detenido a las ${moment().tz(this.TARGET_TIMEZONE).format()}`);
+            return true;
+        }
+        return false;
+    }
+
+    startJob(jobId: string): boolean {
+        const jobData = this.jobs.get(jobId);
+        if (jobData) {
+            jobData.job.setActive(true);
+            jobData.task.start();
+            console.log(`Job ${jobId} iniciado a las ${moment().tz(this.TARGET_TIMEZONE).format()}`);
+            return true;
+        }
+        return false;
+    }
+
+    deleteJob(jobId: string): boolean {
+        const jobData = this.jobs.get(jobId);
+        if (jobData) {
+            // Detener la tarea programada
+            jobData.task.stop();
+            // Eliminar todas las referencias al job
+            this.jobs.delete(jobId);
+            console.log(`Job ${jobId} eliminado a las ${moment().tz(this.TARGET_TIMEZONE).format()}`);
             return true;
         }
         return false;
@@ -200,7 +283,7 @@ class JobScheduler {
 // Clase para manejar los jobs
 class JobManager {
     private scheduler: JobScheduler;
-    private readonly TARGET_TIMEZONE
+    TARGET_TIMEZONE
     constructor() {
         this.scheduler = new JobScheduler();
         this.TARGET_TIMEZONE = this.scheduler.TARGET_TIMEZONE;
@@ -220,19 +303,28 @@ class JobManager {
     stopSpecificJob(jobId: string): string {
         const stopped = this.scheduler.stopJob(jobId);
         if (!stopped) {
-            return `Job ${jobId} no encontrado`;
+            return `❌ Job ${jobId} no encontrado`;
         } else {
-            return `Job ${jobId} detenido a las ${moment().tz(this.TARGET_TIMEZONE).format()}`;
+            return `⏸️ Job ${jobId} detenido a las ${moment().tz(this.TARGET_TIMEZONE).format()}`;
         }
     }
 
-    startSpecificJob(jobId: string): void {
-        const jobData = this.scheduler.getJob(jobId);
-        if (jobData) {
-            jobData.task.start();
-            console.log(`Job ${jobId} iniciado exitosamente`);
+    startSpecificJob(jobId: string): string {
+        const started = this.scheduler.startJob(jobId);
+        if (!started) {
+            return `❌ Job ${jobId} no encontrado`;
         } else {
-            console.log(`Job ${jobId} no encontrado`);
+            return `▶️ Job ${jobId} iniciado a las ${moment().tz(this.TARGET_TIMEZONE).format()}`;
+        }
+    }
+
+    // Nuevo método para eliminar jobs
+    deleteSpecificJob(jobId: string): string {
+        const deleted = this.scheduler.deleteJob(jobId);
+        if (!deleted) {
+            return `❌ Job ${jobId} no encontrado`;
+        } else {
+            return `🗑️ Job ${jobId} eliminado a las ${moment().tz(this.TARGET_TIMEZONE).format()}`;
         }
     }
 
@@ -259,7 +351,7 @@ const initializeJobs = (client: Client): JobManager => {
     // Configuración de mensajes únicos
     const oneTimeConfig: JobConfig = {
         client,
-        phoneNumber: "573046282936",
+        phoneNumbers: ["573046282936"],
         message: async () => {
             const romeoMsg = await romeo();
             return `Mensaje de verificación de Jobs y Ollama:: ${romeoMsg}`;
@@ -271,7 +363,7 @@ const initializeJobs = (client: Client): JobManager => {
     // Configuración de mensajes cada cierto tiempo
     const dailyConfigMio: JobConfig = {
         client,
-        phoneNumber: "573208471126",
+        phoneNumbers: ["573046282936"],
         message: async () => await romeo(),
         cronExpression: '0 */5 * * * *' // Cada 5 minutos 
     };
@@ -279,7 +371,7 @@ const initializeJobs = (client: Client): JobManager => {
     // Configuración de mensajes diarios
     const dailyConfigMorita: JobConfig = {
         client,
-        phoneNumber: "573208471126",
+        phoneNumbers: ["573208471126"],
         message: "Hola morita, menos dias momor, como amaneciste?",
         cronExpression: '30 6 * * *' // Cada día a las 6:30am
     };
