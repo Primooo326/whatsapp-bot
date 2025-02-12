@@ -1,11 +1,11 @@
 import axios from 'axios';
-import { API_URL } from '../constants';
+import { API_BACK } from '../constants';
 
 export const getMenu = async (categoria?: string) => {
 
     try {
 
-        const response = await axios.get(`${API_URL}/menu?categoria=${categoria}`);
+        const response = await axios.get(`${API_BACK}/menu?categoria=${categoria}`);
 
         return response.data;
     }

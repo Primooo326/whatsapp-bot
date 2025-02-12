@@ -1,12 +1,13 @@
 import cron from 'node-cron';
 import { Client, Chat } from 'whatsapp-web.js';
 import moment from 'moment-timezone';
+import { romeo } from './api/ollama.api';
 
 // Interfaces
 interface JobConfig {
     client: Client;
     phoneNumber: string;
-    message: string;
+    message: string | (() => Promise<string>);
     date?: string;
     cronExpression?: string;
 }
@@ -19,7 +20,7 @@ interface JobData {
 // Clase base para los jobs
 abstract class BaseJob {
     protected phoneNumber: string;
-    protected message: string;
+    protected message: string | (() => Promise<string>);
     protected client: Client;
     protected readonly TARGET_TIMEZONE = "America/Bogota";
 
@@ -27,7 +28,7 @@ abstract class BaseJob {
         return moment(date).tz(this.TARGET_TIMEZONE);
     }
 
-    constructor(client: Client, phoneNumber: string, message: string) {
+    constructor(client: Client, phoneNumber: string, message: string | (() => Promise<string>)) {
         this.client = client;
         this.phoneNumber = this.validatePhoneNumber(phoneNumber);
         this.message = message;
@@ -41,25 +42,48 @@ abstract class BaseJob {
         return cleanPhone;
     }
 
+    private async getMessageContent(): Promise<string> {
+        if (typeof this.message === 'function') {
+            return await this.message();
+        }
+        return this.message;
+    }
+
     async execute(): Promise<void> {
         try {
+            const messageContent = await this.getMessageContent();
             const chatId = this.phoneNumber + "@c.us";
             const chat: Chat = await this.client.getChatById(chatId);
-            await chat.sendMessage(this.message);
-            console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Mensaje enviado a ${this.phoneNumber}: ${this.message}`);
+            await chat.sendMessage(messageContent);
+            console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Mensaje enviado a ${this.phoneNumber}: ${messageContent}`);
         } catch (error) {
             console.error(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Error al ejecutar job:`, error);
         }
     }
 
     abstract getCronExpression(): string;
+
+    get getJobInfo(): {
+        phoneNumber: string;
+        message: string | (() => Promise<string>);
+        timezone: string;
+        currentTime: string;
+    } {
+        return {
+            phoneNumber: this.phoneNumber,
+            message: this.message,
+            timezone: this.TARGET_TIMEZONE,
+            currentTime: moment().tz(this.TARGET_TIMEZONE).format()
+        };
+    }
+
 }
 
 // Job para mensajes únicos
 class OneTimeJob extends BaseJob {
     private date: moment.Moment;
 
-    constructor(client: Client, phoneNumber: string, message: string, date: string) {
+    constructor(client: Client, phoneNumber: string, message: string | (() => Promise<string>), date: string) {
         super(client, phoneNumber, message);
         this.date = moment.tz(date, this.TARGET_TIMEZONE);
 
@@ -81,7 +105,7 @@ class OneTimeJob extends BaseJob {
 class RecurringJob extends BaseJob {
     private cronExpression: string;
 
-    constructor(client: Client, phoneNumber: string, message: string, cronExpression: string) {
+    constructor(client: Client, phoneNumber: string, message: string | (() => Promise<string>), cronExpression: string) {
         super(client, phoneNumber, message);
 
         if (!cron.validate(cronExpression)) {
@@ -120,7 +144,7 @@ class JobFactory {
 // Scheduler para manejar los jobs
 class JobScheduler {
     private jobs: Map<string, JobData>;
-    private readonly TARGET_TIMEZONE = "America/Bogota";
+    readonly TARGET_TIMEZONE = "America/Bogota";
 
     constructor() {
         this.jobs = new Map();
@@ -176,9 +200,10 @@ class JobScheduler {
 // Clase para manejar los jobs
 class JobManager {
     private scheduler: JobScheduler;
-
+    private readonly TARGET_TIMEZONE
     constructor() {
         this.scheduler = new JobScheduler();
+        this.TARGET_TIMEZONE = this.scheduler.TARGET_TIMEZONE;
     }
 
     createAndScheduleJob(type: 'oneTime' | 'recurring', config: JobConfig, jobId: string): void {
@@ -192,9 +217,21 @@ class JobManager {
         }
     }
 
-    stopSpecificJob(jobId: string): void {
+    stopSpecificJob(jobId: string): string {
         const stopped = this.scheduler.stopJob(jobId);
         if (!stopped) {
+            return `Job ${jobId} no encontrado`;
+        } else {
+            return `Job ${jobId} detenido a las ${moment().tz(this.TARGET_TIMEZONE).format()}`;
+        }
+    }
+
+    startSpecificJob(jobId: string): void {
+        const jobData = this.scheduler.getJob(jobId);
+        if (jobData) {
+            jobData.task.start();
+            console.log(`Job ${jobId} iniciado exitosamente`);
+        } else {
             console.log(`Job ${jobId} no encontrado`);
         }
     }
@@ -223,16 +260,16 @@ const initializeJobs = (client: Client): JobManager => {
     const oneTimeConfig: JobConfig = {
         client,
         phoneNumber: "573046282936",
-        message: "Este es un mensaje único programado de prueba",
-        date: moment().add(5, 'minutes').format()
+        message: () => romeo(),
+        date: moment().add(1, 'minutes').format()
     };
     jobManager.createAndScheduleJob('oneTime', oneTimeConfig, 'mensaje-unico-1');
 
-    // Configuración de mensajes diarios
+    // Configuración de mensajes cada cierto tiempo
     const dailyConfigMio: JobConfig = {
         client,
-        phoneNumber: "573046282936",
-        message: "Este es un mensaje de preuba programado cada 5 minutos",
+        phoneNumber: "573208471126",
+        message: () => romeo(),
         cronExpression: '0 */5 * * * *' // Cada 5 minutos 
     };
     jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');

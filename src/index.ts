@@ -51,18 +51,17 @@ client.on('ready', () => {
 
 // Manejo de mensajes
 client.on('message', async (message) => {
-    console.log('Mensaje recibido:', message.body);
 
     const contact = await message.getChat();
-    console.log(contact);
-
     if (contact.id.user === "573208471126") {
 
     }
 
-    if (message.body === '!ping') {
-        message.reply('pong');
-    }
+    handleCommand(contact.id._serialized, message.body);
+
+    // if (message.body === '!ping') {
+    //     message.reply('pong');
+    // }
 });
 
 client.initialize();
@@ -72,6 +71,95 @@ const sendMessage = async (id: string, message: string) => {
     client.sendMessage(id, message);
 
 }
+
+let currentCommand: string = '';
+
+const commands = [
+    {
+        command: '!ping',
+        description: 'Ping!',
+        handler: async (id: string) => {
+            sendMessage(id, 'pong');
+        }
+    },
+    {
+        command: '!job',
+        description: 'Lista de trabajos programados',
+        handler: async (id: string) => {
+            const jobs = jobManager.listAllJobs();
+            let message = 'Lista de trabajos programados:\n';
+            jobs.forEach(([jobId, jobData]) => {
+                message += `Job ${jobId}: ${JSON.stringify(jobData.job.getJobInfo)}\n`;
+            });
+            sendMessage(id, message);
+            currentCommand = '';
+        }
+    },
+    {
+        command: '!job-start',
+        description: 'Iniciar un trabajo programado',
+        handler: async (id: string, idJob?: string) => {
+
+            if (idJob && idJob != '!job-start') {
+                jobManager.startSpecificJob(idJob);
+                sendMessage(id, `Job ${idJob} iniciado exitosamente`);
+                currentCommand = '';
+            } else {
+                sendMessage(id, 'Escribe el id del job a iniciar');
+            }
+
+        }
+    },
+    {
+        command: '!job-stop',
+        description: 'Detener un trabajo programado',
+        handler: async (id: string, idJob?: string) => {
+            if (idJob && idJob != '!job-stop') {
+                jobManager.stopSpecificJob(idJob);
+                sendMessage(id, `Job ${idJob} detenido exitosamente`);
+                currentCommand = '';
+            } else {
+                sendMessage(id, 'Escribe el id del job a detener');
+            }
+        }
+    },
+
+]
+
+const handleCommand = async (id: string, message: string) => {
+
+
+    try {
+        if (message.trim().startsWith('!')) {
+
+            const command = message.trim()
+
+            const commandFound = commands.find(cm => cm.command === command)
+            if (commandFound) {
+                commandFound.handler(id, command)
+                currentCommand = command
+            } else {
+                sendMessage(id, `Commando no encontrado: ${command}`)
+            }
+
+        }
+        else {
+            if (currentCommand) {
+                const commandFound = commands.find(cm => cm.command === currentCommand)
+                if (commandFound) {
+                    commandFound.handler(id, message)
+                }
+            } else {
+                console.log('No hay comando actualmente activo')
+            }
+        }
+    } catch (error) {
+        console.log(error);
+        sendMessage(id, 'Error al procesar el comando');
+    }
+
+}
+
 
 // const getContact = async (phone: string) => {
 //     try {
