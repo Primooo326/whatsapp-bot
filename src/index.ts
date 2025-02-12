@@ -1,8 +1,7 @@
 import qrcode from 'qrcode-terminal';
 import { Client, LocalAuth } from 'whatsapp-web.js';
-// import { getUser } from '@api/user.api';
-// import { getMenu } from '@api/menu.api';
 import { initializeJobs, JobManager } from './jobs';
+import { qwen2 } from './api/ollama.api';
 // Configuración del cliente
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -58,10 +57,6 @@ client.on('message', async (message) => {
     }
 
     handleCommand(contact.id._serialized, message.body);
-
-    // if (message.body === '!ping') {
-    //     message.reply('pong');
-    // }
 });
 
 client.initialize();
@@ -76,15 +71,26 @@ let currentCommand: string = '';
 
 const commands = [
     {
+        command: '!help',
+        description: '*Lista de comandos*',
+        handler: async (id: string) => {
+            let message = 'Lista de comandos:\n';
+            commands.forEach((command) => {
+                message += `${command.command}: ${command.description}\n`;
+            });
+            sendMessage(id, message);
+        }
+    },
+    {
         command: '!ping',
-        description: 'Ping!',
+        description: '*Test ping*',
         handler: async (id: string) => {
             sendMessage(id, 'pong');
         }
     },
     {
-        command: '!job',
-        description: 'Lista de trabajos programados',
+        command: '!jobs',
+        description: '*Lista de trabajos programados*',
         handler: async (id: string) => {
             const jobs = jobManager.listAllJobs();
             let message = 'Lista de trabajos programados:\n';
@@ -96,33 +102,17 @@ const commands = [
         }
     },
     {
-        command: '!job-start',
-        description: 'Iniciar un trabajo programado',
-        handler: async (id: string, idJob?: string) => {
-
-            if (idJob && idJob != '!job-start') {
-                jobManager.startSpecificJob(idJob);
-                sendMessage(id, `Job ${idJob} iniciado exitosamente`);
-                currentCommand = '';
+        command: '!qwen',
+        description: '*modelo qwen*:: !qwen <prompt>',
+        handler: async (id: string, prompt?: string) => {
+            if (prompt) {
+                const response = await qwen2(prompt);
+                sendMessage(id, response);
             } else {
-                sendMessage(id, 'Escribe el id del job a iniciar');
-            }
-
-        }
-    },
-    {
-        command: '!job-stop',
-        description: 'Detener un trabajo programado',
-        handler: async (id: string, idJob?: string) => {
-            if (idJob && idJob != '!job-stop') {
-                jobManager.stopSpecificJob(idJob);
-                sendMessage(id, `Job ${idJob} detenido exitosamente`);
-                currentCommand = '';
-            } else {
-                sendMessage(id, 'Escribe el id del job a detener');
+                sendMessage(id, 'Escribe el prompt para generar el poema');
             }
         }
-    },
+    }
 
 ]
 
@@ -132,11 +122,12 @@ const handleCommand = async (id: string, message: string) => {
     try {
         if (message.trim().startsWith('!')) {
 
-            const command = message.trim()
+            const command = message.trim().split(' ')[0]
+            const args = message.trim().split(' ').slice(1).join(' ')
 
             const commandFound = commands.find(cm => cm.command === command)
             if (commandFound) {
-                commandFound.handler(id, command)
+                commandFound.handler(id, args)
                 currentCommand = command
             } else {
                 sendMessage(id, `Commando no encontrado: ${command}`)

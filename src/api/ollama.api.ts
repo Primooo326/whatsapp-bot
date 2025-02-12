@@ -25,3 +25,17 @@ export const romeo = async (): Promise<string> => {
         return "Hubo un error al generar el poema";
     }
 }
+
+export const qwen2 = async (prompt: string): Promise<string> => {
+    try {
+        const response = await axios.post(`${API_OLLAMA}/generate`, {
+            "model": "qwen2.5:0.5b",
+            "prompt": prompt,
+            "stream": false
+        });
+
+        return response.data.response;
+    } catch (error: any) {
+        return "Hubo un error al generar el poema";
+    }
+}

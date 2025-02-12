@@ -260,7 +260,10 @@ const initializeJobs = (client: Client): JobManager => {
     const oneTimeConfig: JobConfig = {
         client,
         phoneNumber: "573046282936",
-        message: () => romeo(),
+        message: async () => {
+            const romeoMsg = await romeo();
+            return `Mensaje de verificación de Jobs y Ollama:: ${romeoMsg}`;
+        },
         date: moment().add(1, 'minutes').format()
     };
     jobManager.createAndScheduleJob('oneTime', oneTimeConfig, 'mensaje-unico-1');
