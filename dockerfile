@@ -75,8 +75,5 @@ COPY --from=builder /usr/lib /usr/lib
 COPY --from=builder /lib /lib
 COPY --from=builder /usr/share /usr/share
 
-# Exponer el puerto (ajusta según tu aplicación)
-EXPOSE 3000
-
 # Comando para ejecutar la aplicación
 CMD ["node", "dist/index.js"]
