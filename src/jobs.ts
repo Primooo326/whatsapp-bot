@@ -361,13 +361,13 @@ const initializeJobs = (client: Client): JobManager => {
     jobManager.createAndScheduleJob('oneTime', oneTimeConfig, 'mensaje-unico-1');
 
     // Configuración de mensajes cada cierto tiempo
-    const dailyConfigMio: JobConfig = {
-        client,
-        phoneNumbers: ["573046282936"],
-        message: async () => await romeo(),
-        cronExpression: '0 */5 * * * *' // Cada 5 minutos 
-    };
-    jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');
+    // const dailyConfigMio: JobConfig = {
+    //     client,
+    //     phoneNumbers: ["573046282936"],
+    //     message: async () => await romeo(),
+    //     cronExpression: '0 */5 * * * *' // Cada 5 minutos 
+    // };
+    // jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');
     // Configuración de mensajes diarios
     const dailyConfigMorita: JobConfig = {
         client,
