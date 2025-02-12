@@ -36,6 +36,7 @@ export const qwen2 = async (prompt: string): Promise<string> => {
 
         return response.data.response;
     } catch (error: any) {
-        return "Hubo un error al generar el poema";
+        console.log(error);
+        return `"Hubo un error al generar el texto: *${error.message}*"`;
     }
 }
