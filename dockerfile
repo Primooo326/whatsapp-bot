@@ -1,27 +1,9 @@
 # Etapa de construcción
-FROM node:18-slim AS builder
+FROM node:18 AS builder
 
 WORKDIR /app
 
-# Copiar solo los archivos necesarios para instalar dependencias
-COPY package*.json ./
-
-# Instalar dependencias incluyendo devDependencies
-RUN npm ci && \
-    npm cache clean --force
-
-# Copiar código fuente
-COPY . .
-
-# Construir la aplicación TypeScript
-RUN npm run build
-
-# Etapa de producción
-FROM node:18-slim
-
-WORKDIR /app
-
-# Instalar dependencias del sistema necesarias para Puppeteer
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
     gconf-service \
     libgbm-dev \
@@ -62,30 +44,38 @@ RUN apt-get update && apt-get install -y \
     lsb-release \
     xdg-utils \
     wget \
-    tzdata \
-    && rm -rf /var/lib/apt/lists/* \
-    # Crear directorios necesarios
-    && mkdir -p /app/logs /app/.wwebjs_auth /app/.wwebjs_cache \
-    # Establecer permisos
-    && chown -R node:node /app
-
-# Configurar variables de entorno para Puppeteer
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
-
-# Cambiar al usuario node por seguridad
-USER node
+    && rm -rf /var/lib/apt/lists/*
 
 # Copiar package.json y package-lock.json
-COPY --from=builder --chown=node:node /app/package*.json ./
+COPY package*.json ./
 
-# Instalar solo dependencias de producción
-RUN npm ci --only=production && \
-    npm cache clean --force
+# Instalar dependencias
+RUN npm install
+
+# Copiar código fuente
+COPY . .
+
+# Construir la aplicación TypeScript
+RUN npm run build
+
+# Etapa de producción
+FROM node:18-slim
+
+WORKDIR /app
+
+# Instalar solo las dependencias de producción
+COPY --from=builder /app/package*.json ./
+RUN npm install --only=production
 
 # Copiar el código compilado
-COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --from=builder /app/dist ./dist
 
-# Exponer el puerto
+# Copiar las dependencias del sistema necesarias
+COPY --from=builder /usr/lib /usr/lib
+COPY --from=builder /lib /lib
+COPY --from=builder /usr/share /usr/share
+
+# Exponer el puerto (ajusta según tu aplicación)
 EXPOSE 3000
 
 # Comando para ejecutar la aplicación
