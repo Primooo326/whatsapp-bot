@@ -7,7 +7,6 @@ import { createUtilityCommands } from './utilityCommands';
 
 export class CommandHandler {
     private commands: Command[] = [];
-    private currentCommand: string = '';
     private context: CommandContext;
 
     constructor(client: Client, jobManager: JobManager) {
@@ -44,16 +43,8 @@ export class CommandHandler {
                 const commandFound = this.commands.find(cm => cm.command === command);
                 if (commandFound) {
                     await commandFound.handler(id, args, this.context);
-                    this.currentCommand = command;
                 } else {
                     await this.sendMessage(id, `Comando no encontrado: ${command}`);
-                }
-            } else {
-                if (this.currentCommand) {
-                    const commandFound = this.commands.find(cm => cm.command === this.currentCommand);
-                    if (commandFound) {
-                        await commandFound.handler(id, message, this.context);
-                    }
                 }
             }
         } catch (error) {
