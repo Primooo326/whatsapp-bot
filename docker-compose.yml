@@ -3,12 +3,25 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: whatsapp-bot
     volumes:
-      - ./logs:/app/logs # Para logs si los necesitas
-      - ./.wwebjs_auth:/app/.wwebjs_auth # Para persistir la autenticación de WhatsApp
-      - ./.wwebjs_cache:/app/.wwebjs_cache # Para persistir el caché de WhatsApp
+      - ./logs:/app/logs:delegated
+      - ./.wwebjs_auth:/app/.wwebjs_auth:delegated
+      - ./.wwebjs_cache:/app/.wwebjs_cache:delegated
     restart: unless-stopped
     environment:
       - NODE_ENV=production
       - TZ=America/Bogota
-      # Agrega otras variables de entorno según necesites
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
