@@ -272,7 +272,7 @@ const initializeJobs = (client: Client): JobManager => {
     const dailyConfigMio: JobConfig = {
         client,
         phoneNumber: "573208471126",
-        message: () => romeo(),
+        message: async () => await romeo(),
         cronExpression: '0 */5 * * * *' // Cada 5 minutos 
     };
     jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');

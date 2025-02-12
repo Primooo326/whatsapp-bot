@@ -1,5 +1,5 @@
 services:
-  nodejs-app:
+  whatsapp-bot:
     build:
       context: .
       dockerfile: Dockerfile
