@@ -12,11 +12,17 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@types/file-saver": "^2.0.7",
+    "@types/image-size": "^0.7.0",
+    "@types/pdfkit": "^0.13.9",
     "axios": "^1.7.9",
+    "file-saver": "^2.0.5",
+    "image-size": "^2.0.0",
     "moment": "^2.30.1",
     "moment-timezone": "^0.5.47",
     "node-cron": "^3.0.3",
     "nodemon": "^3.1.9",
+    "pdfkit": "^0.16.0",
     "qrcode-terminal": "^0.12.0",
     "ts-node": "^10.9.2",
     "whatsapp-web.js": "^1.26.0"

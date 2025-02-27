@@ -1,5 +1,5 @@
 // src/commands/index.ts
-import { Client } from 'whatsapp-web.js';
+import { Client, MessageContent } from 'whatsapp-web.js';
 import { JobManager } from '../jobs';
 import { Command, CommandContext } from './types';
 import { createJobCommands } from './jobCommands';
@@ -30,7 +30,7 @@ export class CommandHandler {
         this.context.commands = this.commands;
     }
 
-    private async sendMessage(id: string, message: string) {
+    private async sendMessage(id: string, message: MessageContent) {
         await this.context.client.sendMessage(id, message);
     }
 

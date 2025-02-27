@@ -3,7 +3,6 @@ import qrcode from 'qrcode-terminal';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import { initializeJobs, JobManager } from './jobs';
 import { CommandHandler } from './commands';
-
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -24,6 +23,7 @@ const client = new Client({
 let jobManager: JobManager;
 let commandHandler: CommandHandler;
 
+
 client.on('qr', (qr) => {
     console.log('Escanea este código QR con tu WhatsApp:');
     qrcode.generate(qr, { small: true });
@@ -42,6 +42,7 @@ client.on('ready', () => {
     jobManager = initializeJobs(client);
     commandHandler = new CommandHandler(client, jobManager);
 
+
     const currentDate = new Date();
     client.sendMessage(
         client.info.wid._serialized,
@@ -51,7 +52,12 @@ client.on('ready', () => {
 
 client.on('message', async (message) => {
     const contact = await message.getChat();
+    await commandHandler.handleCommand(contact.id._serialized, message.body);
+});
 
+client.on('message_create', async (message) => {
+    console.log(message);
+    const contact = await message.getChat();
     await commandHandler.handleCommand(contact.id._serialized, message.body);
 });
 

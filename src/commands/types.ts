@@ -1,5 +1,5 @@
 // src/commands/types.ts
-import { Client } from 'whatsapp-web.js';
+import { Client, MessageContent } from 'whatsapp-web.js';
 import { JobManager } from '../jobs';
 
 // src/commands/types.ts
@@ -12,6 +12,6 @@ export interface Command {
 export interface CommandContext {
     client: Client;
     jobManager: JobManager;
-    sendMessage: (id: string, message: string) => Promise<void>;
+    sendMessage: (id: string, message: MessageContent) => Promise<void>;
     commands: Command[];  // Añadimos esta propiedad
 }

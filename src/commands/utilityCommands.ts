@@ -1,6 +1,8 @@
 // src/commands/utilityCommands.ts
 import { Command, CommandContext } from './types';
 import { qwen2 } from '../api/ollama.api';
+import { generarPDFConImagen, validarHora } from '@/tools/utils';
+import { MessageMedia } from 'whatsapp-web.js';
 
 export const createUtilityCommands = (getCommands: () => Command[]): Command[] => {
     return [
@@ -53,6 +55,27 @@ export const createUtilityCommands = (getCommands: () => Command[]): Command[] =
                         '!qwen Escribe un poema sobre el amor');
                 }
             }
+        },
+        {
+            command: "!excusa",
+            description: "*Genera excusa en formato pdf*:: !excusa <fecha de expiración> <fecha de culminación> <hora de culminación>",
+            handler: async (id: string, args: string | undefined, context: CommandContext) => {
+                if (!args) {
+                    context.sendMessage(id, "Formato: !excusa 28/02/2021 28/02/2021 10:00AM");
+                    return
+                }
+                const [fechaExp, fechaExcusa, horaCulminada] = args.split(" ");
+
+                if (!validarHora(horaCulminada)) {
+                    context.sendMessage(id, "Formato de hora inválido. Debe ser 10:00AM o 10:00PM");
+                    return
+                }
+
+                const url = await generarPDFConImagen(fechaExp, fechaExcusa, horaCulminada);
+                const pdfMedia = MessageMedia.fromFilePath(url);
+                await context.sendMessage(id, pdfMedia);
+
+            },
         }
     ];
 };
