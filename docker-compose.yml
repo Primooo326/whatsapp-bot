@@ -7,6 +7,8 @@ services:
       - ./logs:/app/logs # Para logs si los necesitas
       - ./.wwebjs_auth:/app/.wwebjs_auth # Para persistir la autenticación de WhatsApp
       - ./.wwebjs_cache:/app/.wwebjs_cache # Para persistir el caché de WhatsApp
+      - ./downloads:/app/downloads # Para guardar los archivos descargados
+      - ./assets:/app/assets # Para guardar los archivos de la aplicación
     restart: unless-stopped
     environment:
       - NODE_ENV=production
