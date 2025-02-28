@@ -354,7 +354,8 @@ const initializeJobs = (client: Client): JobManager => {
         phoneNumbers: ["573046282936"],
         message: async () => {
             const romeoMsg = await romeo();
-            return `Mensaje de verificación de Jobs y Ollama:: ${romeoMsg}`;
+            romeoMsg
+            return `Mensaje de verificación de Jobs`;
         },
         date: moment().add(1, 'minutes').format()
     };

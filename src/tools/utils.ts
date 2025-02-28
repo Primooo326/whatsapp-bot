@@ -21,117 +21,24 @@ export function formatearFecha(fechaStr: string): string {
 
     return `${parseInt(dia)} de ${meses[mesIndex]} de ${año}`;
 }
+interface IGenerarPDFConImagen {
+    fileOutPath: string
+    imgPath: string,
+    textos: TextConfig[]
+}
 
-export const generarPDFConImagen = async (fechaExp: string, fechaExcusa: string, horaCulminada: string) => {
+export const generarPDFConImagen = async (
+    config: IGenerarPDFConImagen) => {
     const pdfGenerator = new PDFGenerator();
 
-    const textos: TextConfig[] = [
-        {
-            text: formatearFecha(fechaExp),
-            isBold: true,
-            fontSize: 10,
-            x: 50,
-            y: 200
-        },
-        {
-            text: "La compañía",
-            isBold: false,
-            fontSize: 10,
-            x: 50,
-            y: 250
-        },
-        {
-            text: "THOMAS SEGURIDAD INTEGRAL LTDA",
-            isBold: true,
-            fontSize: 10,
-            x: 130,
-            y: 250
-        },
-        {
-            text: "con",
-            isBold: false,
-            fontSize: 10,
-            x: 385,
-            y: 250
-        },
-        {
-            text: "NIT 830014193-5",
-            isBold: true,
-            fontSize: 10,
-            x: 410,
-            y: 250
-        },
-        {
-            text: "A quien corresponda,",
-            isBold: false,
-            fontSize: 10,
-            x: 50,
-            y: 300
-        },
-        {
-            text: `Por medio de la presente se certifica que el señor Juan Andrés Morales Lizarazo, identificado con cédula de ciudadanía número 1001092278, se encontraba laborando en nuestras instalaciones el día ${formatearFecha(fechaExcusa)} y su jornada laboral culminó a las ${horaCulminada}`,
-            isBold: false,
-            fontSize: 10,
-            x: 50,
-            y: 350
-        },
-        {
-            text: "Este documento se expide a solicitud del interesado para los fines que estime convenientes.",
-            isBold: false,
-            fontSize: 10,
-            x: 50,
-            y: 450
-        },
-        {
-            text: "Atentamente,",
-            isBold: false,
-            fontSize: 10,
-            x: 50,
-            y: 500
-        },
-        {
-            text: "Johnatan Bonilla González",
-            isBold: true,
-            fontSize: 10,
-            x: 50,
-            y: 550
-        },
-        {
-            text: "Líder de desarrollo",
-            isBold: true,
-            fontSize: 10,
-            x: 50,
-            y: 570
-        },
-        {
-            text: "Thomas Seguridad Integral",
-            isBold: true,
-            fontSize: 10,
-            x: 50,
-            y: 590
-        },
-        {
-            text: "(318) 311 7396",
-            isBold: true,
-            fontSize: 10,
-            x: 50,
-            y: 610
-        },
-        {
-            text: "Johnatan.bonilla@tsicol.com",
-            isBold: true,
-            fontSize: 10,
-            x: 50,
-            y: 630
-        },
-
-    ];
+    const { textos, imgPath, fileOutPath } = config
 
     try {
+
         const relativePath = await pdfGenerator.generatePDF(
-            'assets/image.png',
+            imgPath,
             textos,
-            'JuanMoralesExcusa.pdf'
+            fileOutPath
         );
         console.log('PDF generado exitosamente');
         console.log('Ruta relativa del archivo:', relativePath);
