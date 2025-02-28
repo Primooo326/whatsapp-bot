@@ -195,8 +195,6 @@ export const createUtilityCommands = (getCommands: () => Command[]): Command[] =
                 }
                 const [fechaExp, fechaExcusa] = args.split(" ");
 
-
-
                 const textos: TextConfig[] = [
                     {
                         text: formatearFecha(fechaExp),
@@ -329,13 +327,15 @@ export const createUtilityCommands = (getCommands: () => Command[]): Command[] =
         //                     573006055984,
         //                     573132011886,
         //                     573203982800,]
-        //                 // const numbers = [573003709040, 573046282936]
-        //                 numbers.forEach(async (phoneNumber) => {
+
+        //                 Promise.all(numbers.map(async (phoneNumber) => {
         //                     const chatId = phoneNumber + "@c.us";
         //                     const pdfMedia = MessageMedia.fromFilePath(filePath);
         //                     await context.sendMessage(chatId, mesageContent);
         //                     await context.sendMessage(chatId, pdfMedia);
-        //                 })
+        //                     console.log("mensaje enviado a " + phoneNumber)
+        //                 }))
+
         //             }
         //         }
     ];
