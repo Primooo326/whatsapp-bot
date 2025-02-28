@@ -60,7 +60,7 @@ export const createUtilityCommands = (getCommands: () => Command[]): Command[] =
         },
         {
             command: "!excusa",
-            description: "*Genera excusa en formato pdf*:: !excusa <fecha de expiración> <fecha de culminación> <hora de culminación>",
+            description: "*Genera excusa en formato pdf*:: !excusa <fecha de expedición> <fecha de incumplimiento> <hora de incumplimiento>",
             handler: async (id: string, args: string | undefined, context: CommandContext) => {
                 if (!args) {
                     context.sendMessage(id, "Formato: !excusa 28/02/2021 28/02/2021 10:00AM");
@@ -187,10 +187,10 @@ export const createUtilityCommands = (getCommands: () => Command[]): Command[] =
         },
         {
             command: "!excusaSanti",
-            description: "*Genera excusa en formato pdf*:: !excusa <fecha de expiración> <fecha de culminación> <hora de culminación>",
+            description: "*Genera excusa en formato pdf*:: !excusaSanti <fecha de expedición> <fecha de incumplimiento>",
             handler: async (id: string, args: string | undefined, context: CommandContext) => {
                 if (!args) {
-                    context.sendMessage(id, "Formato: !excusa 28/02/2021 28/02/2021");
+                    context.sendMessage(id, "Formato: !excusaSanti 28/02/2021 28/02/2021");
                     return
                 }
                 const [fechaExp, fechaExcusa] = args.split(" ");
