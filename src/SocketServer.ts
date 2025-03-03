@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import http from 'http';
 import { WhatsAppClientFactory } from './WhatsAppClientFactory';
+import pool from './config/database'; // Importa tu conexión a la base de datos
 
 export class SocketServer {
     private io: Server;
@@ -15,37 +16,50 @@ export class SocketServer {
         });
         this.clientFactory = WhatsAppClientFactory.getInstance();
         this.initialize();
+
     }
 
     private initialize(): void {
-        this.io.on('connection', (socket) => {
+        this.io.on('connection', async (socket) => {
             console.log('Cliente conectado:', socket.id);
 
-            socket.on('start_session', async (sessionId: string) => {
+            socket.on('authenticate', async (idUser: string) => {
                 try {
-                    console.log(`Iniciando sesión: ${sessionId}`);
+                    await this.updateSessionInDatabase(socket.id, idUser);
 
-                    if (this.clientFactory.getClient(sessionId)) {
+                } catch (error) {
+                    console.error('Error al iniciar sesión:', error);
+                }
+            });
+
+            // Actualiza la base de datos con la sessionId cuando elusuarios se conecta
+            socket.on('start_session', async (idBot: string) => {
+                try {
+                    // Verifica si la sesión ya existe
+                    if (this.clientFactory.getClient(idBot)) {
                         socket.emit('session_error', {
-                            sessionId,
+                            sessionId: idBot,
                             error: 'Session already exists'
                         });
                         return;
                     }
 
-                    // Configurar los listeners de eventos antes de crear el cliente
-                    this.setupFactoryEventListeners(socket, sessionId);
+                    // Actualiza la base de datos con la sessionId
 
-                    await this.clientFactory.createClient(sessionId);
+                    // Configurar los listeners de eventos antes de crear el cliente
+                    this.setupFactoryEventListeners(socket, idBot);
+
+                    await this.clientFactory.createClient(idBot);
 
                     socket.emit('session_started', {
-                        sessionId,
+                        sessionId: idBot,
                         status: 'initializing'
                     });
 
                 } catch (error: any) {
+                    console.error("Error al iniciar la sesión:", error);
                     socket.emit('session_error', {
-                        sessionId,
+                        sessionId: idBot,
                         error: error.message
                     });
                 }
@@ -81,9 +95,40 @@ export class SocketServer {
 
             socket.on('disconnect', () => {
                 console.log('Cliente desconectado:', socket.id);
+                this.updateSessionInDatabase(socket.id);
             });
+
         });
     }
+
+    private async updateSessionInDatabase(socketId: string, id?: string): Promise<void> {
+        try {
+
+            if (id) {
+                const query = "UPDATEusuarios SET sessionId = ? WHERE uuid = ?";
+                const [result]: any = await pool.query(query, [socketId, id]);
+
+                if (result.affectedRows === 0) {
+                    console.warn(`No se encontró unusuarios con sessionId: ${id}`);
+                } else {
+                    console.log(`Base de datos actualizada con sessionId: ${id}`);
+                }
+            } else {
+                const query = "UPDATEusuarios SET sessionId = NULL WHERE sessionId = ?";
+                const [result]: any = await pool.query(query, [socketId]);
+
+                if (result.affectedRows === 0) {
+                    console.warn(`No se encontró unusuarios con sessionId: ${socketId}`);
+                } else {
+                    console.log(`Base de datos actualizada con sessionId: ${socketId}`);
+                }
+            }
+
+        } catch (error) {
+            console.error("Error al actualizar la base de datos:", error);
+        }
+    }
+
     private setupFactoryEventListeners(socket: any, sessionId: string): void {
         const eventHandler = (eventName: string) => (data: any) => {
             if (data.sessionId === sessionId) {
@@ -102,7 +147,7 @@ export class SocketServer {
             this.clientFactory.removeListener('ready', eventHandler('session_ready'));
             this.clientFactory.removeListener('authenticated', eventHandler('session_authenticated'));
             this.clientFactory.removeListener('auth_failure', eventHandler('session_auth_failure'));
+
         });
     }
-
 }

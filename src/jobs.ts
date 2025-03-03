@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { Client, Chat } from 'whatsapp-web.js';
 import moment from 'moment-timezone';
-import { romeo } from './api/ollama.api';
+// import { romeo } from './api/ollama.api';
 
 // Interfaces
 interface JobConfig {
@@ -353,29 +353,29 @@ const initializeJobs = (client: Client): JobManager => {
         client,
         phoneNumbers: ["573046282936"],
         message: async () => {
-            const romeoMsg = await romeo();
-            return `Mensaje de verificación de Jobs y Ollama:: ${romeoMsg}`;
+            // const romeoMsg = await romeo();
+            return `Mensaje de verificación de Jobs y Ollama:: `;
         },
         date: moment().add(1, 'minutes').format()
     };
     jobManager.createAndScheduleJob('oneTime', oneTimeConfig, 'mensaje-unico-1');
 
     // Configuración de mensajes cada cierto tiempo
-    const dailyConfigMio: JobConfig = {
-        client,
-        phoneNumbers: ["573046282936", "573208471126"],
-        message: async () => await romeo(),
-        cronExpression: '30 7,10,13,16,19,22 * * *' // Cada día a las 7:30, 10:30, 13:30, 16:30, 19:30 y 22:30
-    };
-    jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');
-    // Configuración de mensajes diarios
-    const dailyConfigMorita: JobConfig = {
-        client,
-        phoneNumbers: ["573208471126"],
-        message: "Hola morita, menos dias momor, como amaneciste?",
-        cronExpression: '30 6 * * *' // Cada día a las 6:30am
-    };
-    jobManager.createAndScheduleJob('recurring', dailyConfigMorita, 'mensaje-diario-morita');
+    // const dailyConfigMio: JobConfig = {
+    //     client,
+    //     phoneNumbers: ["573046282936", "573208471126"],
+    //     message: async () => await romeo(),
+    //     cronExpression: '30 7,10,13,16,19,22 * * *' // Cada día a las 7:30, 10:30, 13:30, 16:30, 19:30 y 22:30
+    // };
+    // jobManager.createAndScheduleJob('recurring', dailyConfigMio, 'mensaje-diario-mio');
+    // // Configuración de mensajes diarios
+    // const dailyConfigMorita: JobConfig = {
+    //     client,
+    //     phoneNumbers: ["573208471126"],
+    //     message: "Hola morita, menos dias momor, como amaneciste?",
+    //     cronExpression: '30 6 * * *' // Cada día a las 6:30am
+    // };
+    // jobManager.createAndScheduleJob('recurring', dailyConfigMorita, 'mensaje-diario-morita');
 
 
     return jobManager;

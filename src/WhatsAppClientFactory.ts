@@ -1,4 +1,4 @@
-import qrcode from 'qrcode-terminal';
+// import qrcode from 'qrcode-terminal';
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import { JobManager, initializeJobs } from './jobs';
 import { CommandHandler } from './commands';
@@ -63,12 +63,13 @@ export class WhatsAppClientFactory extends EventEmitter {
         return client;
     }
 
+
     private setupClientEvents(session: WhatsAppSession, sessionId: string): void {
         const { client } = session;
 
         client.on('qr', (qr) => {
             console.log(`[Session ${sessionId}] Escanea este código QR con tu WhatsApp:`);
-            qrcode.generate(qr, { small: true });
+            // qrcode.generate(qr, { small: true });
             this.emit('qr', { sessionId, qr });
         });
 
