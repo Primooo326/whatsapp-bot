@@ -107,7 +107,7 @@ export const updateUsuario = async (req: Request, res: Response) => {
 
     try {
         const [result] = await pool.query(
-            "UPDATEusuarios SET nombre = ?, telefono = ?, correo = ? WHERE uuid = ?",
+            "UPDATE usuarios SET nombre = ?, telefono = ?, correo = ? WHERE uuid = ?",
             [nombre, telefono, correo, id]
         );
         if ((result as any).affectedRows === 0) res.status(404).json({ message: "Usuario no encontrado" });

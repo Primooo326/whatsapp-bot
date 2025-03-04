@@ -35,6 +35,7 @@ export class SocketServer {
             // Actualiza la base de datos con la sessionId cuando elusuarios se conecta
             socket.on('start_session', async (idBot: string) => {
                 try {
+                    console.log("start_session:", idBot);
                     // Verifica si la sesión ya existe
                     if (this.clientFactory.getClient(idBot)) {
                         socket.emit('session_error', {
@@ -105,7 +106,7 @@ export class SocketServer {
         try {
 
             if (id) {
-                const query = "UPDATEusuarios SET sessionId = ? WHERE uuid = ?";
+                const query = "UPDATE usuarios SET sessionId = ? WHERE uuid = ?";
                 const [result]: any = await pool.query(query, [socketId, id]);
 
                 if (result.affectedRows === 0) {
@@ -114,7 +115,7 @@ export class SocketServer {
                     console.log(`Base de datos actualizada con sessionId: ${id}`);
                 }
             } else {
-                const query = "UPDATEusuarios SET sessionId = NULL WHERE sessionId = ?";
+                const query = "UPDATE usuarios SET sessionId = NULL WHERE sessionId = ?";
                 const [result]: any = await pool.query(query, [socketId]);
 
                 if (result.affectedRows === 0) {
