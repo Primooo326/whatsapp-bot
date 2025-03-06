@@ -1,6 +1,5 @@
-// import qrcode from 'qrcode-terminal';
 import { Client, LocalAuth } from 'whatsapp-web.js';
-import { JobManager, initializeJobs } from './jobs';
+import { JobManager } from './jobs'; // Added initializeJobs import
 import { CommandHandler } from './commands';
 import { EventEmitter } from 'events';
 
@@ -63,22 +62,17 @@ export class WhatsAppClientFactory extends EventEmitter {
         return client;
     }
 
-
     private setupClientEvents(session: WhatsAppSession, sessionId: string): void {
         const { client } = session;
 
         client.on('qr', (qr) => {
             console.log(`[Session ${sessionId}] Escanea este código QR con tu WhatsApp:`);
-            // qrcode.generate(qr, { small: true });
             this.emit('qr', { sessionId, qr });
         });
 
         client.on('authenticated', () => {
             console.log(`[Session ${sessionId}] Autenticado con éxito`);
-            this.emit('authenticated', {
-                sessionId,
-                timestamp: new Date().toISOString()
-            });
+            this.emit('authenticated', { sessionId, timestamp: new Date().toISOString() });
         });
 
         client.on('auth_failure', (msg) => {
@@ -89,19 +83,13 @@ export class WhatsAppClientFactory extends EventEmitter {
         client.on('ready', () => {
             console.log(`[Session ${sessionId}] El cliente está listo para usar`);
             session.isReady = true;
-            session.jobManager = initializeJobs(client);
+            session.jobManager = new JobManager();
             session.commandHandler = new CommandHandler(client, session.jobManager);
 
             const currentDate = new Date();
-            client.sendMessage(
-                client.info.wid._serialized,
-                `[${currentDate.toLocaleString()}] El cliente está listo para usar`
-            );
+            client.sendMessage(client.info.wid._serialized, `[${currentDate.toLocaleString()}] El cliente está listo para usar`);
 
-            this.emit('ready', {
-                sessionId,
-                timestamp: new Date().toISOString()
-            });
+            this.emit('ready', { sessionId, timestamp: new Date().toISOString() });
         });
 
         client.on('message', async (message) => {
@@ -109,6 +97,7 @@ export class WhatsAppClientFactory extends EventEmitter {
             await session.commandHandler.handleCommand(contact.id._serialized, message.body);
         });
     }
+
     public getClient(sessionId: string): Client | undefined {
         return this.sessions.get(sessionId)?.client;
     }

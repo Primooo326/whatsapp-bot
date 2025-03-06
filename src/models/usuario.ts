@@ -1,44 +1,124 @@
-export interface Usuario {
-    uuid: string; // Identificador único universal del usuario
-    nombre: string;
-    telefono: string;
-    correo: string; // Ahora es obligatorio (ya no tiene el signo ?)
-    contraseña: string;
-    status: 0 | 1; // Solo puede ser 0 o 1
-    sessionId: string;
+export interface IUser {
+    id: string;
+    username: string;
+    email: string;
+    password_hash: string;
+    created_at: Date;
+    updated_at: Date;
 }
 
-export interface Bot {
-    uuid: string; // Identificador único universal del bot
-    usuarioId: string; // UUID del usuario propietario del bot
-    nombre: string; // Nombre del bot
-    descripcion: string; // Descripción del bot
-    status: "activo" | "inactivo" | "suspendido"; // Estado del bot
+export interface IBot {
+    id: string;
+    user_id: string;
+    name: string;
+    description?: string;
+    status: BotStatus;
+    created_at: Date;
+    updated_at: Date;
 }
 
-export interface CanalEnvio {
-    tipo: "email" | "telefono"; // Tipo de canal: email o teléfono
-    direccion: string; // Dirección del canal: correo electrónico o número de teléfono
+export interface IChannel {
+    id: string;
+    channel_type: ChannelType;
+    channel_account: string;
+    created_at: Date;
+    updated_at: Date;
 }
 
-export interface ArchivoAdjunto {
-    tipo: "imagen" | "pdf" | "word" | "video"; // Tipo de archivo
-    nombre: string; // Nombre del archivo
-    url: string; // URL o ruta del archivo
+export interface IContact {
+    id: string;
+    name?: string;
+    channel_id?: string;
+    created_at: Date;
+    updated_at: Date;
 }
 
-export interface ProgramacionEnvio {
-    fecha: string; // Fecha programada en formato ISO (YYYY-MM-DD)
-    hora: string; // Hora programada en formato 24 horas (HH:mm)
+export interface IContactGroup {
+    id: string;
+    bot_id: string;
+    name: string;
+    description?: string;
+    created_at: Date;
+    updated_at: Date;
 }
 
-export interface JobEnvioMensaje {
-    id: string; // Identificador único del job
-    botId: string; // UUID del bot que crea el job
-    destinatarios: CanalEnvio[]; // Lista de canales de envío (email o teléfono)
-    mensaje: string; // Cuerpo del mensaje
-    archivosAdjuntos?: ArchivoAdjunto[]; // Lista de archivos adjuntos (opcional)
-    programacionEnvio?: ProgramacionEnvio; // Fecha y hora programada para el envío (opcional)
-    creadoEn: Date; // Fecha y hora en que se creó el job
-    status: "pendiente" | "enviado" | "fallido"; // Estado del job
+export interface IContactGroupMember {
+    group_id: string;
+    contact_id: string;
 }
+
+export interface IService {
+    id: string;
+    bot_id: string;
+    name: string;
+    category: ServiceCategory;
+    description?: string;
+    scheduled_date?: string;
+    scheduled_type: ServiceScheduledType;
+    status: ServiceStatus;
+    created_at: Date;
+    updated_at: Date;
+}
+
+export interface IServiceExecution {
+    id: string;
+    service_id: string;
+    contact_id?: string;
+    executed_at: Date;
+    status: ServiceExecutionStatus;
+    created_at: Date;
+    updated_at: Date;
+}
+
+export interface IServiceContent {
+    id: string;
+    service_id: string;
+    message_body: string;
+    attachments_url?: IAttachment[];
+    created_at: Date;
+    updated_at: Date;
+}
+
+export interface IAttachment {
+    id: string;
+    url: string;
+    description?: string;
+    created_at: Date;
+    updated_at: Date;
+}
+
+export enum ServiceCategory {
+    MASSIVE_MESSAGE = 'Servicio de mensajes masivos',
+    CONVERSATION_FLOW = 'Servicio de flujos de conversación',
+    IA_PROMPT = 'Servicio de prompts con IA'
+}
+
+export enum ServiceScheduledType {
+    SCHEDULED = 'programado',
+    ONCE = 'unaVez'
+}
+
+export enum ServiceStatus {
+    SCHEDULED = 'programado',
+    EXECUTED = 'ejecutado',
+    WITH_ALERTS = 'con alertas',
+    FAILED = 'fallido'
+}
+
+export enum ChannelType {
+    EMAIL = 'correo',
+    PHONE = 'telefono'
+}
+
+export enum ServiceExecutionStatus {
+    READ = 'leido',
+    SENT = 'enviado',
+    NOT_FOUND = 'no encontrado'
+}
+
+export enum BotStatus {
+    ACTIVE = 'activo',
+    INACTIVE = 'inactivo'
+}
+
+
