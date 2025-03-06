@@ -22,6 +22,11 @@ class BotService {
         return bots.length > 0 ? bots[0] : null;
     }
 
+    async getBotsByUserId(userId: string): Promise<IBot[]> {
+        const [rows] = await this.db.execute('SELECT * FROM bots WHERE user_id = ?', [userId]);
+        return rows as IBot[];
+    }
+
     async getAllBots(): Promise<IBot[]> {
         const [rows] = await this.db.execute('SELECT * FROM bots');
         return rows as IBot[];

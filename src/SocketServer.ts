@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
 import http from 'http';
 import { WhatsAppClientFactory } from './WhatsAppClientFactory';
-import pool from './config/database'; // Importa tu conexión a la base de datos
+//import pool from './config/database'; // Importa tu conexión a la base de datos
 
 export class SocketServer {
     private io: Server;
@@ -25,7 +25,7 @@ export class SocketServer {
 
             socket.on('authenticate', async (idUser: string) => {
                 try {
-                    await this.updateSessionInDatabase(socket.id, idUser);
+                    // await this.updateSessionInDatabase(socket.id, idUser);
 
                 } catch (error) {
                     console.error('Error al iniciar sesión:', error);
@@ -96,39 +96,39 @@ export class SocketServer {
 
             socket.on('disconnect', () => {
                 console.log('Cliente desconectado:', socket.id);
-                this.updateSessionInDatabase(socket.id);
+                // this.updateSessionInDatabase(socket.id);
             });
 
         });
     }
 
-    private async updateSessionInDatabase(socketId: string, id?: string): Promise<void> {
-        try {
+    // private async updateSessionInDatabase(socketId: string, id?: string): Promise<void> {
+    //     try {
 
-            if (id) {
-                const query = "UPDATE usuarios SET sessionId = ? WHERE uuid = ?";
-                const [result]: any = await pool.query(query, [socketId, id]);
+    //         if (id) {
+    //             const query = "UPDATE usuarios SET sessionId = ? WHERE uuid = ?";
+    //             const [result]: any = await pool.query(query, [socketId, id]);
 
-                if (result.affectedRows === 0) {
-                    console.warn(`No se encontró unusuarios con sessionId: ${id}`);
-                } else {
-                    console.log(`Base de datos actualizada con sessionId: ${id}`);
-                }
-            } else {
-                const query = "UPDATE usuarios SET sessionId = NULL WHERE sessionId = ?";
-                const [result]: any = await pool.query(query, [socketId]);
+    //             if (result.affectedRows === 0) {
+    //                 console.warn(`No se encontró unusuarios con sessionId: ${id}`);
+    //             } else {
+    //                 console.log(`Base de datos actualizada con sessionId: ${id}`);
+    //             }
+    //         } else {
+    //             const query = "UPDATE usuarios SET sessionId = NULL WHERE sessionId = ?";
+    //             const [result]: any = await pool.query(query, [socketId]);
 
-                if (result.affectedRows === 0) {
-                    console.warn(`No se encontró unusuarios con sessionId: ${socketId}`);
-                } else {
-                    console.log(`Base de datos actualizada con sessionId: ${socketId}`);
-                }
-            }
+    //             if (result.affectedRows === 0) {
+    //                 console.warn(`No se encontró unusuarios con sessionId: ${socketId}`);
+    //             } else {
+    //                 console.log(`Base de datos actualizada con sessionId: ${socketId}`);
+    //             }
+    //         }
 
-        } catch (error) {
-            console.error("Error al actualizar la base de datos:", error);
-        }
-    }
+    //     } catch (error) {
+    //         console.error("Error al actualizar la base de datos:", error);
+    //     }
+    // }
 
     private setupFactoryEventListeners(socket: any, sessionId: string): void {
         const eventHandler = (eventName: string) => (data: any) => {

@@ -37,6 +37,18 @@ export const getBotById = async (req: Request, res: Response): Promise<void> => 
     }
 };
 
+export const getBotsByUserId = async (req: Request, res: Response): Promise<void> => {
+    const { userId } = req.params;
+
+    try {
+        const bots = await botService.getBotsByUserId(userId);
+        res.json(bots);
+    } catch (error) {
+        console.error("Error al obtener los bots del usuario:", error);
+        res.status(500).json({ message: "Error al obtener los bots del usuario" });
+    }
+}
+
 export const getAllBots = async (req: Request, res: Response): Promise<void> => {
     try {
         const bots = await botService.getAllBots();
