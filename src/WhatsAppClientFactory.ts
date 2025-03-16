@@ -25,7 +25,6 @@ export class WhatsAppClientFactory extends EventEmitter {
         }
         return WhatsAppClientFactory.instance;
     }
-
     public async createClient(sessionId: string): Promise<Client> {
         if (this.sessions.has(sessionId)) {
             throw new Error(`Session ${sessionId} already exists`);
@@ -115,6 +114,16 @@ export class WhatsAppClientFactory extends EventEmitter {
         if (session) {
             await session.client.destroy();
             this.sessions.delete(sessionId);
+        }
+    }
+    public async sendMessage(sessionId: string, to: string[], message: string): Promise<void> {
+        const session = this.sessions.get(sessionId);
+        if (session) {
+            // await session.client.sendMessage(to, message);
+            const promises = to.map(async (contact) => await session.client.sendMessage(contact, message));
+
+            await Promise.all(promises);
+
         }
     }
 }
