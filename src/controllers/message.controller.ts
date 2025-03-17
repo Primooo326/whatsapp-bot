@@ -5,7 +5,9 @@ import { Chat } from 'whatsapp-web.js';
 class MessageController {
 
     public async sendMessage(req: Request, res: Response): Promise<void> {
-        const { sessionId, to, message } = req.body;
+
+        console.log(req.body);
+        const { sessionId, to, message } = req.body
 
         if (!sessionId || !to || !message) {
             res.status(400).send('Faltan parámetros requeridos: sessionId, to, message');
