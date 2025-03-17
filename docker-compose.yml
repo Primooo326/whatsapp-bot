@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    ports:
+      - "3100:3100"
     volumes:
       - ./logs:/app/logs # Para logs si los necesitas
       - ./.wwebjs_auth:/app/.wwebjs_auth # Para persistir la autenticación de WhatsApp
