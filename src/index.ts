@@ -4,7 +4,9 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import { initializeJobs, JobManager } from './jobs';
 import { CommandHandler } from './commands';
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        clientId: "mio"
+    }),
     puppeteer: {
         headless: true,
         args: [
@@ -67,6 +69,9 @@ const main = async () => {
         });
 
         client.initialize();
+
+
+
     } catch (error) {
         console.log(error);
 

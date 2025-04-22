@@ -1,15 +1,19 @@
 services:
-  nodejs-app:
+  wha-app:
     build:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./logs:/app/logs # Para logs si los necesitas
       - ./.wwebjs_auth:/app/.wwebjs_auth # Para persistir la autenticación de WhatsApp
       - ./.wwebjs_cache:/app/.wwebjs_cache # Para persistir el caché de WhatsApp
       - ./downloads:/app/downloads # Para guardar los archivos descargados
       - ./assets:/app/assets # Para guardar los archivos de la aplicación
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - NODE_ENV=production
       - TZ=America/Bogota
