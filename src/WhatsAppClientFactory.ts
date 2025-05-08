@@ -2,7 +2,7 @@ import { Client, LocalAuth } from 'whatsapp-web.js';
 import { JobManager } from './jobs'; // Added initializeJobs import
 import { CommandHandler } from './commands';
 import { EventEmitter } from 'events';
-
+import qrTerminal from "qrcode-terminal"
 interface WhatsAppSession {
     client: Client;
     jobManager: JobManager;
@@ -66,6 +66,7 @@ export class WhatsAppClientFactory extends EventEmitter {
 
         client.on('qr', (qr) => {
             console.log(`[Session ${sessionId}] Escanea este código QR con tu WhatsApp:`);
+            qrTerminal.generate(qr, { small: true });
             this.emit('qr', { sessionId, qr });
         });
 

@@ -1,7 +1,6 @@
 import { Server } from 'socket.io';
 import http from 'http';
 import { WhatsAppClientFactory } from './WhatsAppClientFactory';
-//import pool from './config/database'; // Importa tu conexión a la base de datos
 
 export class SocketServer {
     private io: Server;
@@ -20,6 +19,7 @@ export class SocketServer {
     }
 
     private initialize(): void {
+        this.clientFactory.createClient("FC9CECEF-93B9-EF11-88D0-6045BD7990E1");
         this.io.on('connection', async (socket) => {
             console.log('Cliente conectado:', socket.id);
 
@@ -101,34 +101,6 @@ export class SocketServer {
 
         });
     }
-
-    // private async updateSessionInDatabase(socketId: string, id?: string): Promise<void> {
-    //     try {
-
-    //         if (id) {
-    //             const query = "UPDATE usuarios SET sessionId = ? WHERE uuid = ?";
-    //             const [result]: any = await pool.query(query, [socketId, id]);
-
-    //             if (result.affectedRows === 0) {
-    //                 console.warn(`No se encontró unusuarios con sessionId: ${id}`);
-    //             } else {
-    //                 console.log(`Base de datos actualizada con sessionId: ${id}`);
-    //             }
-    //         } else {
-    //             const query = "UPDATE usuarios SET sessionId = NULL WHERE sessionId = ?";
-    //             const [result]: any = await pool.query(query, [socketId]);
-
-    //             if (result.affectedRows === 0) {
-    //                 console.warn(`No se encontró unusuarios con sessionId: ${socketId}`);
-    //             } else {
-    //                 console.log(`Base de datos actualizada con sessionId: ${socketId}`);
-    //             }
-    //         }
-
-    //     } catch (error) {
-    //         console.error("Error al actualizar la base de datos:", error);
-    //     }
-    // }
 
     private setupFactoryEventListeners(socket: any, sessionId: string): void {
         const eventHandler = (eventName: string) => (data: any) => {
