@@ -6,14 +6,19 @@ class BotService {
     constructor(private db: Pool) { }
 
     async createBot(userId: string, name: string, description: string, status: BotStatus): Promise<IBot> {
-        const id = uuidv4();
-        const createdAt = new Date();
-        const updatedAt = new Date();
-        await this.db.execute(
-            'INSERT INTO bots (id, user_id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [id, userId, name, description, status, createdAt, updatedAt]
-        );
-        return { id, user_id: userId, name, description, status, created_at: createdAt, updated_at: updatedAt };
+        try {
+            const id = uuidv4();
+            const createdAt = new Date();
+            const updatedAt = new Date();
+            await this.db.execute(
+                'INSERT INTO bots (id, user_id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [id, userId, name, description, status, createdAt, updatedAt]
+            );
+            return { id, user_id: userId, name, description, status, created_at: createdAt, updated_at: updatedAt };
+        } catch (error) {
+            console.error('Error creating bot:', error);
+            throw error;
+        }
     }
 
     async getBotById(id: string): Promise<IBot | null> {

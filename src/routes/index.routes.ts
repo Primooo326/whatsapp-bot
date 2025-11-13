@@ -4,6 +4,6 @@ import { Router } from "express";
 const router = Router();
 
 
-router.use("/wha", messageController.sendMessage);
+router.post("/send-message", messageController.sendMessage);
 
 export default router;

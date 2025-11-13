@@ -5,8 +5,8 @@ import { EventEmitter } from 'events';
 import qrTerminal from "qrcode-terminal"
 interface WhatsAppSession {
     client: Client;
-    jobManager: JobManager;
-    commandHandler: CommandHandler;
+    jobManager: JobManager | null;
+    commandHandler: CommandHandler | null;
     isReady: boolean;
 }
 
@@ -26,39 +26,44 @@ export class WhatsAppClientFactory extends EventEmitter {
         return WhatsAppClientFactory.instance;
     }
     public async createClient(sessionId: string): Promise<Client> {
-        if (this.sessions.has(sessionId)) {
-            throw new Error(`Session ${sessionId} already exists`);
-        }
-
-        const client = new Client({
-            authStrategy: new LocalAuth({ clientId: sessionId }),
-            puppeteer: {
-                headless: true,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--single-process',
-                    '--disable-gpu'
-                ]
+        try {
+            if (this.sessions.has(sessionId)) {
+                throw new Error(`Session ${sessionId} already exists`);
             }
-        });
 
-        const session: WhatsAppSession = {
-            client,
-            jobManager: null!,
-            commandHandler: null!,
-            isReady: false
-        };
+            const client = new Client({
+                authStrategy: new LocalAuth({ clientId: sessionId }),
+                puppeteer: {
+                    headless: true,
+                    args: [
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--single-process',
+                        '--disable-gpu'
+                    ]
+                }
+            });
 
-        this.setupClientEvents(session, sessionId);
-        this.sessions.set(sessionId, session);
+            const session: WhatsAppSession = {
+                client,
+                jobManager: null,
+                commandHandler: null,
+                isReady: false
+            };
 
-        await client.initialize();
-        return client;
+            this.setupClientEvents(session, sessionId);
+            this.sessions.set(sessionId, session);
+
+            await client.initialize();
+            return client;
+        } catch (error) {
+            console.error(`Error creating client for session ${sessionId}:`, error);
+            throw error;
+        }
     }
 
     private setupClientEvents(session: WhatsAppSession, sessionId: string): void {
@@ -93,8 +98,10 @@ export class WhatsAppClientFactory extends EventEmitter {
         });
 
         client.on('message', async (message) => {
-            const contact = await message.getChat();
-            await session.commandHandler.handleCommand(contact.id._serialized, message.body);
+            if (session.commandHandler) {
+                const contact = await message.getChat();
+                await session.commandHandler.handleCommand(contact.id._serialized, message.body);
+            }
         });
     }
 
@@ -111,20 +118,27 @@ export class WhatsAppClientFactory extends EventEmitter {
     }
 
     public async destroySession(sessionId: string): Promise<void> {
-        const session = this.sessions.get(sessionId);
-        if (session) {
-            await session.client.destroy();
-            this.sessions.delete(sessionId);
+        try {
+            const session = this.sessions.get(sessionId);
+            if (session) {
+                await session.client.destroy();
+                this.sessions.delete(sessionId);
+            }
+        } catch (error) {
+            console.error(`Error destroying session ${sessionId}:`, error);
+            throw error;
         }
     }
     public async sendMessage(sessionId: string, to: string[], message: string): Promise<void> {
-        const session = this.sessions.get(sessionId);
-        if (session) {
-            // await session.client.sendMessage(to, message);
-            const promises = to.map(async (contact) => await session.client.sendMessage(contact, message));
-
-            await Promise.all(promises);
-
+        try {
+            const session = this.sessions.get(sessionId);
+            if (session) {
+                const promises = to.map(async (contact) => await session.client.sendMessage(contact, message));
+                await Promise.all(promises);
+            }
+        } catch (error) {
+            console.error(`Error sending message for session ${sessionId}:`, error);
+            throw error;
         }
     }
 }

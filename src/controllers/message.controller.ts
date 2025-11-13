@@ -21,7 +21,6 @@ class MessageController {
             const client = clientFactory.getClient(sessionId);
 
             if (!client) {
-                console.log(client);
                 res.status(400).send('No se encontró el cliente');
                 return;
             }

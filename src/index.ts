@@ -15,6 +15,5 @@ app.use("/api", apiRoutes);
 const PORT = process.env.PORT || 3100;
 
 server.listen(PORT, () => {
-    socketServer
     console.log(`Server running on port ${PORT}`);
 });
