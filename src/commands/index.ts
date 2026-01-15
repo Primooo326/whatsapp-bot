@@ -31,7 +31,7 @@ export class CommandHandler {
     }
 
     private async sendMessage(id: string, message: string) {
-        await this.context.client.sendMessage(id, message);
+        await this.context.client.sendMessage(id, message, { sendSeen: false });
     }
 
     public async handleCommand(id: string, message: string) {

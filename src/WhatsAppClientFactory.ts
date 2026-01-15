@@ -85,14 +85,18 @@ export class WhatsAppClientFactory extends EventEmitter {
             this.emit('auth_failure', { sessionId, error: msg });
         });
 
-        client.on('ready', () => {
+        client.on('ready', async () => {
             console.log(`[Session ${sessionId}] El cliente está listo para usar`);
             session.isReady = true;
             session.jobManager = new JobManager();
             session.commandHandler = new CommandHandler(client, session.jobManager);
 
             const currentDate = new Date();
-            client.sendMessage(client.info.wid._serialized, `[${currentDate.toLocaleString()}] El cliente está listo para usar`);
+            try {
+                await client.sendMessage(client.info.wid._serialized, `[${currentDate.toLocaleString()}] El cliente está listo para usar`, { sendSeen: false });
+            } catch (error) {
+                console.error(`[Session ${sessionId}] Error al enviar mensaje de inicio (posible bug de whatsapp-web.js):`, error);
+            }
 
             this.emit('ready', { sessionId, timestamp: new Date().toISOString() });
         });
@@ -133,7 +137,7 @@ export class WhatsAppClientFactory extends EventEmitter {
         try {
             const session = this.sessions.get(sessionId);
             if (session) {
-                const promises = to.map(async (contact) => await session.client.sendMessage(contact, message));
+                const promises = to.map(async (contact) => await session.client.sendMessage(contact, message, { sendSeen: false }));
                 await Promise.all(promises);
             }
         } catch (error) {

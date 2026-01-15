@@ -29,7 +29,7 @@ class MessageController {
 
                 const chatId = number + "@c.us";
                 const chat: Chat = await client.getChatById(chatId);
-                await chat.sendMessage(message);
+                await chat.sendMessage(message, { sendSeen: false });
 
             });
 

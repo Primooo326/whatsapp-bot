@@ -61,7 +61,7 @@ abstract class BaseJob {
                 try {
                     const chatId = phoneNumber + "@c.us";
                     const chat: Chat = await this.client.getChatById(chatId);
-                    await chat.sendMessage(messageContent);
+                    await chat.sendMessage(messageContent, { sendSeen: false });
                     console.log(`[${moment().tz(this.TARGET_TIMEZONE).format()}] Mensaje enviado a ${phoneNumber}: ${messageContent}`);
                 } catch (error) {
                     console.error(`Error al enviar mensaje a ${phoneNumber}:`, error);
