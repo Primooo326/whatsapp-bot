@@ -1,9 +1,10 @@
+import 'dotenv/config';
+
 export const config = {
     port: process.env.PORT || 3100,
-    sessionId: process.env.WHATSAPP_SESSION_ID || 'FC9CECEF-93B9-EF11-88D0-6045BD7990E1',
+    sessionId: process.env.WHATSAPP_SESSION_ID || 'default-session',
     mongodb: {
-        uri: process.env.MONGODB_URI || 'mongodb+srv...',
-        dbName: 'wha_metrics'
+        uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/wha_metrics'
     },
     puppeteer: {
         headless: true,
