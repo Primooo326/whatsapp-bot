@@ -1,43 +1,92 @@
-import { Request, Response } from 'express';
-import { WhatsAppClientFactory } from '../WhatsAppClientFactory';
-import { Chat } from 'whatsapp-web.js';
+import { Request, Response, NextFunction } from 'express';
+import { whatsAppClient } from '../core/WhatsAppClient';
+import { SendMessageRequest, SendGroupMessageRequest, ApiResponse, GroupInfo } from '../types';
+import { AppError } from '../middlewares/errorHandler';
 
 class MessageController {
-
-    public async sendMessage(req: Request, res: Response): Promise<void> {
-
-        console.log(req.body);
-        const { sessionId, to, message } = req.body
-
-        if (!sessionId || !to || !message) {
-            res.status(400).send('Faltan parámetros requeridos: sessionId, to, message');
-            return;
-        }
-
+    public async sendMessage(
+        req: Request<object, ApiResponse, SendMessageRequest>,
+        res: Response<ApiResponse>,
+        next: NextFunction
+    ): Promise<void> {
         try {
+            const { to, message } = req.body;
 
-            const clientFactory = WhatsAppClientFactory.getInstance();
-
-            const client = clientFactory.getClient(sessionId);
-
-            if (!client) {
-                res.status(400).send('No se encontró el cliente');
-                return;
+            // Validación
+            if (!to || !Array.isArray(to) || to.length === 0) {
+                throw new AppError(400, 'El campo "to" es requerido y debe ser un array de números');
             }
 
-            const promises = to.map(async (number: string) => {
+            if (!message || typeof message !== 'string') {
+                throw new AppError(400, 'El campo "message" es requerido');
+            }
 
-                const chatId = number + "@c.us";
-                const chat: Chat = await client.getChatById(chatId);
-                await chat.sendMessage(message, { sendSeen: false });
+            if (!whatsAppClient.isReady()) {
+                throw new AppError(503, 'El cliente de WhatsApp no está listo');
+            }
 
+            const results = await whatsAppClient.sendToMultiple(to, message);
+
+            res.status(200).json({
+                success: true,
+                message: `Mensajes enviados: ${results.success.length}, fallidos: ${results.failed.length}`,
+                data: results
             });
+        } catch (error) {
+            next(error);
+        }
+    }
 
-            await Promise.all(promises);
-            res.status(200).send('Mensaje enviado con éxito');
-        } catch (error: any) {
-            console.error(`Error al enviar mensaje: ${error.message}`);
-            res.status(500).send('Error al enviar mensaje');
+    public async getGroups(
+        _req: Request,
+        res: Response<ApiResponse<GroupInfo[]>>,
+        next: NextFunction
+    ): Promise<void> {
+        try {
+            if (!whatsAppClient.isReady()) {
+                throw new AppError(503, 'El cliente de WhatsApp no está listo');
+            }
+
+            const groups = await whatsAppClient.getGroups();
+
+            res.status(200).json({
+                success: true,
+                message: `Se encontraron ${groups.length} grupos`,
+                data: groups
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    public async sendToGroup(
+        req: Request<object, ApiResponse, SendGroupMessageRequest>,
+        res: Response<ApiResponse>,
+        next: NextFunction
+    ): Promise<void> {
+        try {
+            const { groupId, message } = req.body;
+
+            if (!groupId || typeof groupId !== 'string') {
+                throw new AppError(400, 'El campo "groupId" es requerido');
+            }
+
+            if (!message || typeof message !== 'string') {
+                throw new AppError(400, 'El campo "message" es requerido');
+            }
+
+            if (!whatsAppClient.isReady()) {
+                throw new AppError(503, 'El cliente de WhatsApp no está listo');
+            }
+
+            await whatsAppClient.sendToGroup(groupId, message);
+
+            res.status(200).json({
+                success: true,
+                message: 'Mensaje enviado al grupo exitosamente'
+            });
+        } catch (error) {
+            next(error);
         }
     }
 }
