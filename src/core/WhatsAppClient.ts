@@ -1,4 +1,4 @@
-import { Client, LocalAuth, Chat } from 'whatsapp-web.js';
+import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrTerminal from 'qrcode-terminal';
 import { config } from '../config';
 import { metricsService } from '../services/metrics.service';
@@ -11,7 +11,11 @@ class WhatsAppClient {
     private constructor() {
         this.client = new Client({
             authStrategy: new LocalAuth({ clientId: config.sessionId }),
-            puppeteer: config.puppeteer
+            puppeteer: config.puppeteer,
+            webVersionCache: {
+                type: 'remote',
+                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
+            }
         });
 
         this.setupEventListeners();
@@ -30,6 +34,10 @@ class WhatsAppClient {
             qrTerminal.generate(qr, { small: true });
         });
 
+        this.client.on('loading_screen', (percent, message) => {
+            console.log(`[WhatsApp] Cargando: ${percent}% - ${message}`);
+        });
+
         this.client.on('authenticated', () => {
             console.log('[WhatsApp] Autenticado con éxito');
         });
@@ -39,9 +47,14 @@ class WhatsAppClient {
         });
 
         this.client.on('ready', async () => {
-            console.log('[WhatsApp] Cliente listo');
+            console.log('[WhatsApp] Cliente listo (evento ready)');
             this.ready = true;
             await metricsService.trackClientStatus('ready');
+        });
+
+        // @ts-ignore - Este evento existe en algunas versiones
+        this.client.on('change_state', (state: string) => {
+            console.log(`[WhatsApp] Estado cambiado a: ${state}`);
         });
 
         this.client.on('disconnected', async (reason) => {
@@ -49,11 +62,56 @@ class WhatsAppClient {
             this.ready = false;
             await metricsService.trackClientStatus('disconnected', reason);
         });
+
+        // Catch-all para debug
+        this.client.on('message', () => {
+            if (!this.ready) {
+                console.log('[WhatsApp] Recibido mensaje - marcando cliente como listo');
+                this.ready = true;
+            }
+        });
     }
 
     public async initialize(): Promise<void> {
         console.log('[WhatsApp] Inicializando cliente...');
-        await this.client.initialize();
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Timeout: WhatsApp client failed to become ready within 5 minutes'));
+            }, 300000); // 5 minutos de timeout para escaneo de QR
+
+            this.client.once('ready', () => {
+                console.log('[WhatsApp] Cliente listo (evento ready)');
+                clearTimeout(timeout);
+                this.ready = true;
+                resolve();
+            });
+
+            // Fallback: esperar después de autenticación y marcar como listo
+            this.client.once('authenticated', () => {
+                console.log('[WhatsApp] Autenticado, esperando evento ready...');
+
+                // Después de 60 segundos, si ready no llegó, marcar como listo de todas formas
+                setTimeout(() => {
+                    if (this.ready) return;
+
+                    console.log('[WhatsApp] Evento ready no recibido después de 60s, marcando como listo...');
+                    clearTimeout(timeout);
+                    this.ready = true;
+                    resolve();
+                }, 60000);
+            });
+
+            this.client.once('auth_failure', (msg) => {
+                clearTimeout(timeout);
+                reject(new Error(`Auth failure: ${msg}`));
+            });
+
+            this.client.initialize().catch((error) => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+        });
     }
 
     public isReady(): boolean {
@@ -66,8 +124,7 @@ class WhatsAppClient {
         }
 
         const chatId = phoneNumber.replace(/\D/g, '') + '@c.us';
-        const chat: Chat = await this.client.getChatById(chatId);
-        await chat.sendMessage(message, { sendSeen: false });
+        await this.client.sendMessage(chatId, message);
     }
 
     public async sendToMultiple(phoneNumbers: string[], message: string): Promise<{ success: string[]; failed: string[] }> {
