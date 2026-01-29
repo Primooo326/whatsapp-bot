@@ -25,7 +25,25 @@ class MessageController {
                 throw new AppError(503, 'El cliente de WhatsApp no está listo');
             }
 
-            const results = await whatsAppClient.sendToMultiple(to, message);
+            const groupsFiltered = to.filter((number) => number.endsWith('@g.us'));
+
+            const numbersFiltered = to.filter((number) => !number.endsWith('@g.us'));
+
+            let resultsGroup: { success: string[]; failed: string[] } = { success: [], failed: [] };
+
+            if (groupsFiltered.length > 0) {
+
+                const groupsFilteredSend = groupsFiltered.map(async (group) => {
+                    await whatsAppClient.sendToGroup(group, message);
+                    resultsGroup.success.push(group);
+
+                });
+
+                await Promise.all(groupsFilteredSend);
+
+            }
+
+            const results = await whatsAppClient.sendToMultiple(numbersFiltered, message);
 
             res.status(200).json({
                 success: true,

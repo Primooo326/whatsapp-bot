@@ -70,6 +70,25 @@ class WhatsAppClient {
                 this.ready = true;
             }
         });
+
+        // Capturar errores internos de la librería (conocido bug con 'update' undefined)
+        process.on('uncaughtException', (error) => {
+            if (error.message?.includes("Cannot read properties of undefined (reading 'update')")) {
+                // Silenciar este error conocido de la librería
+                console.log('[WhatsApp] Error interno ignorado (bug conocido de la librería)');
+            } else {
+                console.error('[Error no manejado]:', error);
+            }
+        });
+
+        process.on('unhandledRejection', (reason: any) => {
+            if (reason?.message?.includes("Cannot read properties of undefined (reading 'update')")) {
+                // Silenciar este error conocido de la librería
+                console.log('[WhatsApp] Promise rechazada ignorada (bug conocido de la librería)');
+            } else {
+                console.error('[Promesa rechazada no manejada]:', reason);
+            }
+        });
     }
 
     public async initialize(): Promise<void> {
@@ -118,13 +137,30 @@ class WhatsAppClient {
         return this.ready;
     }
 
-    public async sendMessage(phoneNumber: string, message: string): Promise<void> {
+    public async sendMessage(phoneNumber: string, message: string, retries = 3): Promise<void> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
         }
 
         const chatId = phoneNumber.replace(/\D/g, '') + '@c.us';
-        await this.client.sendMessage(chatId, message);
+
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                await this.client.sendMessage(chatId, message);
+                return; // Éxito, salir
+            } catch (error: any) {
+                const isUpdateError = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
+                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')");
+
+                if (isUpdateError && attempt < retries) {
+                    const delay = attempt * 2000; // 2s, 4s, 6s
+                    console.log(`[WhatsApp] Reintentando envío (${attempt}/${retries}) en ${delay / 1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    throw error; // Si no es ese error o ya se acabaron los reintentos
+                }
+            }
+        }
     }
 
     public async sendToMultiple(phoneNumbers: string[], message: string): Promise<{ success: string[]; failed: string[] }> {
@@ -172,26 +208,33 @@ class WhatsAppClient {
         return groupsData;
     }
 
-    public async sendToGroup(groupId: string, message: string): Promise<string> {
+    public async sendToGroup(groupId: string, message: string, retries = 3): Promise<string> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
         }
 
-        const chat = await this.client.getChatById(groupId);
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                // Usar client.sendMessage directamente para evitar el bug de getChatById
+                await this.client.sendMessage(groupId, message);
+                console.log(`[WhatsApp] Mensaje enviado al grupo ${groupId}`);
+                await metricsService.trackGroupMessageSent(groupId, groupId, message.length);
+                return groupId;
+            } catch (error: any) {
+                const isUpdateError = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
+                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')");
 
-        if (!chat.isGroup) {
-            throw new Error('El ID proporcionado no corresponde a un grupo');
+                if (isUpdateError && attempt < retries) {
+                    const delay = attempt * 2000;
+                    console.log(`[WhatsApp] Reintentando envío a grupo (${attempt}/${retries}) en ${delay / 1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    await metricsService.trackGroupMessageFailed(groupId, error.message || 'Unknown error');
+                    throw error;
+                }
+            }
         }
-
-        try {
-            await chat.sendMessage(message, { sendSeen: false });
-            console.log(`[WhatsApp] Mensaje enviado al grupo ${chat.name}`);
-            await metricsService.trackGroupMessageSent(groupId, chat.name, message.length);
-            return chat.name;
-        } catch (error: any) {
-            await metricsService.trackGroupMessageFailed(groupId, error.message || 'Unknown error');
-            throw error;
-        }
+        throw new Error('No se pudo enviar el mensaje al grupo después de varios intentos');
     }
 }
 

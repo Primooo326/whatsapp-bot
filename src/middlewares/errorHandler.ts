@@ -17,6 +17,12 @@ export const errorHandler = (
     res: Response<ApiResponse>,
     _next: NextFunction
 ): void => {
+    // Ignorar error conocido de whatsapp-web.js
+    if (err.message?.includes("Cannot read properties of undefined (reading 'update')")) {
+        console.log('[WhatsApp] Error interno ignorado (bug conocido)');
+        return;
+    }
+
     console.error('[Error]:', err.message);
 
     if (err instanceof AppError) {
