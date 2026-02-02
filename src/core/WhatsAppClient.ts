@@ -63,11 +63,59 @@ class WhatsAppClient {
             await metricsService.trackClientStatus('disconnected', reason);
         });
 
-        // Catch-all para debug
-        this.client.on('message', () => {
-            if (!this.ready) {
-                console.log('[WhatsApp] Recibido mensaje - marcando cliente como listo');
-                this.ready = true;
+        // Evento 'message_create': Captura TODOS los mensajes (propios y recibidos)
+        // Usamos este en lugar de 'message' porque en versiones alpha 'message' puede no emitirse
+        this.client.on('message_create', async (msg) => {
+            // Mensajes PROPIOS: detectar comandos como /financer
+            if (msg.fromMe) {
+                if (msg.body?.startsWith('/financer')) {
+                    const mensaje = msg.body.replace('/financer', '').trim();
+
+                    if (mensaje) {
+                        console.log(`[Bot] Comando /financer detectado: "${mensaje}"`);
+
+                        try {
+                            const response = await fetch('https://n8n.primooo.dev/webhook/bot-financer', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({ mensaje })
+                            });
+
+                            if (response.ok) {
+                                console.log('[Bot] Mensaje enviado al webhook correctamente');
+                            } else {
+                                console.error('[Bot] Error del webhook:', response.status, response.statusText);
+                            }
+                        } catch (error: any) {
+                            console.error('[Bot] Error enviando al webhook:', error.message);
+                        }
+                    }
+                }
+            } else {
+                // Mensajes RECIBIDOS de otros
+                console.log('========================================');
+                console.log('[WhatsApp] 📩 MENSAJE RECIBIDO:');
+                console.log(`  - De: ${msg.from}`);
+                console.log(`  - Tipo: ${msg.type}`);
+                console.log(`  - Cuerpo: ${msg.body?.substring(0, 100) || '(sin texto)'}${(msg.body?.length || 0) > 100 ? '...' : ''}`);
+                console.log(`  - Tiene media: ${msg.hasMedia}`);
+                console.log(`  - Es de grupo: ${msg.from.includes('@g.us')}`);
+                console.log(`  - Timestamp: ${new Date(msg.timestamp * 1000).toISOString()}`);
+                console.log('========================================');
+
+                // Aquí puedes agregar tu lógica para procesar mensajes entrantes
+                // Por ejemplo, responder automáticamente, guardar en BD, etc.
+
+                // Ejemplo: detectar comandos entrantes (con prefijo !)
+                if (msg.body?.startsWith('!')) {
+                    const comando = msg.body.split(' ')[0].toLowerCase();
+                    console.log(`[WhatsApp] Comando detectado: ${comando}`);
+
+                    // Puedes emitir eventos o llamar a handlers específicos aquí
+                    // this.handleIncomingCommand(msg, comando);
+                }
             }
         });
 
@@ -89,6 +137,8 @@ class WhatsAppClient {
                 console.error('[Promesa rechazada no manejada]:', reason);
             }
         });
+
+        console.log('[WhatsApp] Event listeners registrados correctamente');
     }
 
     public async initialize(): Promise<void> {
@@ -117,6 +167,7 @@ class WhatsAppClient {
                     console.log('[WhatsApp] Evento ready no recibido después de 60s, marcando como listo...');
                     clearTimeout(timeout);
                     this.ready = true;
+
                     resolve();
                 }, 60000);
             });
