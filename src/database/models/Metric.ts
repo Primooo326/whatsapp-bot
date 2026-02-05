@@ -10,7 +10,12 @@ export type MetricEventType =
     | 'client_ready'           // Cliente WhatsApp listo
     | 'client_disconnected'    // Cliente desconectado
     | 'api_request'            // Petición a la API
-    | 'api_error';             // Error en la API
+    | 'api_error'              // Error en la API
+    | 'media_sent'             // Multimedia enviado
+    | 'media_failed'           // Multimedia fallido
+    | 'file_sent'              // Archivo enviado
+    | 'file_failed'            // Archivo fallido
+    | 'download_failed';       // Error de descarga
 
 export interface IMetric extends Document {
     eventType: MetricEventType;
@@ -31,6 +36,7 @@ export interface IMetric extends Document {
         errorCode?: string;
         // Metadata adicional
         sessionId?: string;
+        tags?: string[];
         [key: string]: any;
     };
 }
@@ -48,7 +54,12 @@ const MetricSchema = new Schema<IMetric>({
             'client_ready',
             'client_disconnected',
             'api_request',
-            'api_error'
+            'api_error',
+            'media_sent',
+            'media_failed',
+            'file_sent',
+            'file_failed',
+            'download_failed'
         ],
         index: true
     },

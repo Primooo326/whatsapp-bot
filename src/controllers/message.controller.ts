@@ -10,15 +10,27 @@ class MessageController {
         next: NextFunction
     ): Promise<void> {
         try {
-            const { to, message } = req.body;
+            const { to, message, multimedia, archivo, tags } = req.body;
 
             // Validación
             if (!to || !Array.isArray(to) || to.length === 0) {
                 throw new AppError(400, 'El campo "to" es requerido y debe ser un array de números');
             }
 
-            if (!message || typeof message !== 'string') {
-                throw new AppError(400, 'El campo "message" es requerido');
+            if (!message && (!multimedia || multimedia.length === 0) && (!archivo || archivo.length === 0)) {
+                throw new AppError(400, 'Se requiere "message", "multimedia" o "archivo"');
+            }
+
+            if (multimedia && (!Array.isArray(multimedia) || multimedia.some(url => typeof url !== 'string'))) {
+                throw new AppError(400, 'El campo "multimedia" debe ser un array de URLs (strings)');
+            }
+
+            if (archivo && (!Array.isArray(archivo) || archivo.some(url => typeof url !== 'string'))) {
+                throw new AppError(400, 'El campo "archivo" debe ser un array de URLs (strings)');
+            }
+
+            if (tags && (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string'))) {
+                throw new AppError(400, 'El campo "tags" debe ser un array de strings');
             }
 
             if (!whatsAppClient.isReady()) {
@@ -34,7 +46,7 @@ class MessageController {
             if (groupsFiltered.length > 0) {
 
                 const groupsFilteredSend = groupsFiltered.map(async (group) => {
-                    await whatsAppClient.sendToGroup(group, message);
+                    await whatsAppClient.sendToGroup(group, message, { multimedia, archivo }, 3, tags);
                     resultsGroup.success.push(group);
 
                 });
@@ -43,7 +55,7 @@ class MessageController {
 
             }
 
-            const results = await whatsAppClient.sendToMultiple(numbersFiltered, message);
+            const results = await whatsAppClient.sendToMultiple(numbersFiltered, message, { multimedia, archivo }, tags);
 
             res.status(200).json({
                 success: true,
@@ -83,21 +95,33 @@ class MessageController {
         next: NextFunction
     ): Promise<void> {
         try {
-            const { groupId, message } = req.body;
+            const { groupId, message, multimedia, archivo, tags } = req.body;
 
             if (!groupId || typeof groupId !== 'string') {
                 throw new AppError(400, 'El campo "groupId" es requerido');
             }
 
-            if (!message || typeof message !== 'string') {
-                throw new AppError(400, 'El campo "message" es requerido');
+            if (!message && (!multimedia || multimedia.length === 0) && (!archivo || archivo.length === 0)) {
+                throw new AppError(400, 'Se requiere "message", "multimedia" o "archivo"');
+            }
+
+            if (multimedia && (!Array.isArray(multimedia) || multimedia.some(url => typeof url !== 'string'))) {
+                throw new AppError(400, 'El campo "multimedia" debe ser un array de URLs (strings)');
+            }
+
+            if (archivo && (!Array.isArray(archivo) || archivo.some(url => typeof url !== 'string'))) {
+                throw new AppError(400, 'El campo "archivo" debe ser un array de URLs (strings)');
+            }
+
+            if (tags && (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string'))) {
+                throw new AppError(400, 'El campo "tags" debe ser un array de strings');
             }
 
             if (!whatsAppClient.isReady()) {
                 throw new AppError(503, 'El cliente de WhatsApp no está listo');
             }
 
-            await whatsAppClient.sendToGroup(groupId, message);
+            await whatsAppClient.sendToGroup(groupId, message, { multimedia, archivo }, 3, tags);
 
             res.status(200).json({
                 success: true,

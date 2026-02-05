@@ -10,8 +10,20 @@ interface MetricsResponse {
         groupMessagesFailed: number;
         apiRequests: number;
         apiErrors: number;
+        mediaSent: number;
+        mediaFailed: number;
+        filesSent: number;
+        filesFailed: number;
     };
     avgResponseTimeMs: number;
+    topRecipients: {
+        sent: { recipient: string; count: number }[];
+        failed: { recipient: string; count: number }[];
+    };
+    topGroups: {
+        sent: { groupId: string; groupName?: string; count: number }[];
+        failed: { groupId: string; groupName?: string; count: number }[];
+    };
 }
 
 class MetricsController {
@@ -21,9 +33,13 @@ class MetricsController {
         next: NextFunction
     ): Promise<void> {
         try {
-            const [todayMetrics, avgResponseTime] = await Promise.all([
+            const [todayMetrics, avgResponseTime, topSent, topFailed, topGroupsSent, topGroupsFailed] = await Promise.all([
                 metricsService.getTodayMetrics(),
-                metricsService.getAverageResponseTime(24)
+                metricsService.getAverageResponseTime(24),
+                metricsService.getTopRecipients(10, 'sent'),
+                metricsService.getTopRecipients(10, 'failed'),
+                metricsService.getTopGroups(10, 'sent'),
+                metricsService.getTopGroups(10, 'failed')
             ]);
 
             res.status(200).json({
@@ -31,7 +47,15 @@ class MetricsController {
                 message: 'Métricas obtenidas exitosamente',
                 data: {
                     today: todayMetrics,
-                    avgResponseTimeMs: Math.round(avgResponseTime * 100) / 100
+                    avgResponseTimeMs: Math.round(avgResponseTime * 100) / 100,
+                    topRecipients: {
+                        sent: topSent,
+                        failed: topFailed
+                    },
+                    topGroups: {
+                        sent: topGroupsSent,
+                        failed: topGroupsFailed
+                    }
                 }
             });
         } catch (error) {

@@ -1,11 +1,17 @@
 export interface SendMessageRequest {
     to: string[];
     message: string;
+    multimedia?: string[];
+    archivo?: string[];
+    tags?: string[];
 }
 
 export interface SendGroupMessageRequest {
     groupId: string;
     message: string;
+    multimedia?: string[];
+    archivo?: string[];
+    tags?: string[];
 }
 
 export interface GroupInfo {

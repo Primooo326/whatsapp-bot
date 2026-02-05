@@ -33,29 +33,41 @@ class MetricsService {
     /**
      * Registra un mensaje enviado exitosamente
      */
-    async trackMessageSent(recipient: string, messageLength: number): Promise<void> {
-        await this.trackEvent('message_sent', { recipient, messageLength });
+    /**
+     * Registra un mensaje enviado exitosamente
+     */
+    async trackMessageSent(recipient: string, messageLength: number, tags?: string[]): Promise<void> {
+        await this.trackEvent('message_sent', { recipient, messageLength, tags });
     }
 
     /**
      * Registra un mensaje fallido
      */
-    async trackMessageFailed(recipient: string, errorMessage: string): Promise<void> {
-        await this.trackEvent('message_failed', { recipient, errorMessage });
+    /**
+     * Registra un mensaje fallido
+     */
+    async trackMessageFailed(recipient: string, errorMessage: string, tags?: string[]): Promise<void> {
+        await this.trackEvent('message_failed', { recipient, errorMessage, tags });
     }
 
     /**
      * Registra un mensaje a grupo enviado
      */
-    async trackGroupMessageSent(groupId: string, groupName: string, messageLength: number): Promise<void> {
-        await this.trackEvent('group_message_sent', { groupId, groupName, messageLength });
+    /**
+     * Registra un mensaje a grupo enviado
+     */
+    async trackGroupMessageSent(groupId: string, groupName: string, messageLength: number, tags?: string[]): Promise<void> {
+        await this.trackEvent('group_message_sent', { groupId, groupName, messageLength, tags });
     }
 
     /**
      * Registra un mensaje a grupo fallido
      */
-    async trackGroupMessageFailed(groupId: string, errorMessage: string): Promise<void> {
-        await this.trackEvent('group_message_failed', { groupId, errorMessage });
+    /**
+     * Registra un mensaje a grupo fallido
+     */
+    async trackGroupMessageFailed(groupId: string, errorMessage: string, tags?: string[]): Promise<void> {
+        await this.trackEvent('group_message_failed', { groupId, errorMessage, tags });
     }
 
     /**
@@ -84,12 +96,44 @@ class MetricsService {
         await this.trackEvent('api_error', { endpoint, method, errorMessage, statusCode });
     }
 
-    /**
-     * Registra estado del cliente WhatsApp
-     */
     async trackClientStatus(status: 'ready' | 'disconnected', reason?: string): Promise<void> {
         const eventType = status === 'ready' ? 'client_ready' : 'client_disconnected';
         await this.trackEvent(eventType, { reason });
+    }
+
+    /**
+     * Registra multimedia enviado
+     */
+    async trackMediaSent(recipient: string, type: string, tags?: string[]): Promise<void> {
+        await this.trackEvent('media_sent', { recipient, type, tags });
+    }
+
+    /**
+     * Registra multimedia fallido
+     */
+    async trackMediaFailed(recipient: string, errorMessage: string, tags?: string[]): Promise<void> {
+        await this.trackEvent('media_failed', { recipient, errorMessage, tags });
+    }
+
+    /**
+     * Registra archivo enviado
+     */
+    async trackFileSent(recipient: string, type: string, tags?: string[]): Promise<void> {
+        await this.trackEvent('file_sent', { recipient, type, tags });
+    }
+
+    /**
+     * Registra archivo fallido
+     */
+    async trackFileFailed(recipient: string, errorMessage: string, tags?: string[]): Promise<void> {
+        await this.trackEvent('file_failed', { recipient, errorMessage, tags });
+    }
+
+    /**
+     * Registra fallo de descarga
+     */
+    async trackDownloadFailed(url: string, errorMessage: string): Promise<void> {
+        await this.trackEvent('download_failed', { url, errorMessage });
     }
 
     /**
@@ -102,6 +146,10 @@ class MetricsService {
         groupMessagesFailed: number;
         apiRequests: number;
         apiErrors: number;
+        mediaSent: number;
+        mediaFailed: number;
+        filesSent: number;
+        filesFailed: number;
     }> {
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
@@ -112,14 +160,22 @@ class MetricsService {
             groupMessagesSent,
             groupMessagesFailed,
             apiRequests,
-            apiErrors
+            apiErrors,
+            mediaSent,
+            mediaFailed,
+            filesSent,
+            filesFailed
         ] = await Promise.all([
             Metric.countDocuments({ eventType: 'message_sent', timestamp: { $gte: startOfDay } }),
             Metric.countDocuments({ eventType: 'message_failed', timestamp: { $gte: startOfDay } }),
             Metric.countDocuments({ eventType: 'group_message_sent', timestamp: { $gte: startOfDay } }),
             Metric.countDocuments({ eventType: 'group_message_failed', timestamp: { $gte: startOfDay } }),
             Metric.countDocuments({ eventType: 'api_request', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'api_error', timestamp: { $gte: startOfDay } })
+            Metric.countDocuments({ eventType: 'api_error', timestamp: { $gte: startOfDay } }),
+            Metric.countDocuments({ eventType: 'media_sent', timestamp: { $gte: startOfDay } }),
+            Metric.countDocuments({ eventType: 'media_failed', timestamp: { $gte: startOfDay } }),
+            Metric.countDocuments({ eventType: 'file_sent', timestamp: { $gte: startOfDay } }),
+            Metric.countDocuments({ eventType: 'file_failed', timestamp: { $gte: startOfDay } })
         ]);
 
         return {
@@ -128,7 +184,11 @@ class MetricsService {
             groupMessagesSent,
             groupMessagesFailed,
             apiRequests,
-            apiErrors
+            apiErrors,
+            mediaSent,
+            mediaFailed,
+            filesSent,
+            filesFailed
         };
     }
 
@@ -326,6 +386,76 @@ class MetricsService {
             summary,
             dailyBreakdown
         };
+    }
+
+    /**
+     * Obtiene los destinatarios con más mensajes (enviados o fallidos)
+     */
+    async getTopRecipients(limit: number = 10, type: 'sent' | 'failed' = 'sent'): Promise<{ recipient: string; count: number }[]> {
+        const eventType = type === 'sent' ? 'message_sent' : 'message_failed';
+
+        const result = await Metric.aggregate([
+            {
+                $match: { eventType }
+            },
+            {
+                $group: {
+                    _id: '$data.recipient',
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $sort: { count: -1 }
+            },
+            {
+                $limit: limit
+            },
+            {
+                $project: {
+                    _id: 0,
+                    recipient: '$_id',
+                    count: 1
+                }
+            }
+        ]);
+
+        return result;
+    }
+
+    /**
+     * Obtiene los grupos con más mensajes (enviados o fallidos)
+     */
+    async getTopGroups(limit: number = 10, type: 'sent' | 'failed' = 'sent'): Promise<{ groupId: string; groupName?: string; count: number }[]> {
+        const eventType = type === 'sent' ? 'group_message_sent' : 'group_message_failed';
+
+        const result = await Metric.aggregate([
+            {
+                $match: { eventType }
+            },
+            {
+                $group: {
+                    _id: '$data.groupId',
+                    groupName: { $first: '$data.groupName' },
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $sort: { count: -1 }
+            },
+            {
+                $limit: limit
+            },
+            {
+                $project: {
+                    _id: 0,
+                    groupId: '$_id',
+                    groupName: 1,
+                    count: 1
+                }
+            }
+        ]);
+
+        return result;
     }
 }
 
