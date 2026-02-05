@@ -10,7 +10,7 @@ class MessageController {
         next: NextFunction
     ): Promise<void> {
         try {
-            const { to, message, multimedia, archivo, tags } = req.body;
+            const { to, message, multimedia, archivo, tags, envioMultimediaJunto } = req.body;
 
             // Validación
             if (!to || !Array.isArray(to) || to.length === 0) {
@@ -46,7 +46,7 @@ class MessageController {
             if (groupsFiltered.length > 0) {
 
                 const groupsFilteredSend = groupsFiltered.map(async (group) => {
-                    await whatsAppClient.sendToGroup(group, message, { multimedia, archivo }, 3, tags);
+                    await whatsAppClient.sendToGroup(group, message, { multimedia, archivo }, 3, tags, envioMultimediaJunto);
                     resultsGroup.success.push(group);
 
                 });
@@ -55,7 +55,11 @@ class MessageController {
 
             }
 
-            const results = await whatsAppClient.sendToMultiple(numbersFiltered, message, { multimedia, archivo }, tags);
+            const results = await whatsAppClient.sendToMultiple(numbersFiltered, message, { multimedia, archivo }, tags, envioMultimediaJunto);
+
+            // Merge group results
+            results.success.push(...resultsGroup.success);
+            results.failed.push(...resultsGroup.failed);
 
             res.status(200).json({
                 success: true,
@@ -95,7 +99,7 @@ class MessageController {
         next: NextFunction
     ): Promise<void> {
         try {
-            const { groupId, message, multimedia, archivo, tags } = req.body;
+            const { groupId, message, multimedia, archivo, tags, envioMultimediaJunto } = req.body;
 
             if (!groupId || typeof groupId !== 'string') {
                 throw new AppError(400, 'El campo "groupId" es requerido');
@@ -121,7 +125,7 @@ class MessageController {
                 throw new AppError(503, 'El cliente de WhatsApp no está listo');
             }
 
-            await whatsAppClient.sendToGroup(groupId, message, { multimedia, archivo }, 3, tags);
+            await whatsAppClient.sendToGroup(groupId, message, { multimedia, archivo }, 3, tags, envioMultimediaJunto);
 
             res.status(200).json({
                 success: true,

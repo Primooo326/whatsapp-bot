@@ -1,9 +1,10 @@
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import qrTerminal from 'qrcode-terminal';
 import * as fs from 'fs';
-import * as path from 'path';
+
 import { config } from '../config';
 import { metricsService } from '../services/metrics.service';
+import { FileUtils } from '../utils/FileUtils';
 
 class WhatsAppClient {
     private static instance: WhatsAppClient;
@@ -190,52 +191,15 @@ class WhatsAppClient {
         return this.ready;
     }
 
-    private async downloadFile(url: string, type: 'multimedia' | 'archivo'): Promise<{ path: string; filename: string; mimetype: string } | null> {
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch ${url}: ${response.statusText}`);
-            }
 
-            const buffer = await response.arrayBuffer();
-            const contentType = response.headers.get('content-type') || 'application/octet-stream';
-
-            // Extract filename from url or header
-            const urlPath = new URL(url).pathname;
-            let filename = path.basename(urlPath);
-            if (!filename || filename === '/') {
-                filename = `file_${Date.now()}`;
-            }
-
-            // Ensure extension matches content type if possible
-            if (!path.extname(filename)) {
-                if (contentType.includes('image/jpeg')) filename += '.jpg';
-                else if (contentType.includes('image/png')) filename += '.png';
-                else if (contentType.includes('application/pdf')) filename += '.pdf';
-            }
-
-            const downloadPath = path.resolve(process.cwd(), 'downloads');
-            if (!fs.existsSync(downloadPath)) {
-                fs.mkdirSync(downloadPath, { recursive: true });
-            }
-
-            const filePath = path.join(downloadPath, `${Date.now()}_${filename}`);
-            fs.writeFileSync(filePath, Buffer.from(buffer));
-
-            return { path: filePath, filename, mimetype: contentType };
-        } catch (error: any) {
-            console.error(`[WhatsApp] Error descargando archivo ${url}:`, error);
-            await metricsService.trackDownloadFailed(url, error.message);
-            return null;
-        }
-    }
 
     public async sendMessage(
         phoneNumber: string,
         message: string,
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
-        tags: string[] = []
+        tags: string[] = [],
+        envioMultimediaJunto: boolean = false
     ): Promise<void> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
@@ -245,20 +209,25 @@ class WhatsAppClient {
 
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-                // 1. Send text message if exists
-                if (message) {
-                    await this.client.sendMessage(chatId, message);
-                }
+                let messageSentWithMedia = false;
 
                 // 2. Process Multimedia
                 if (files.multimedia && files.multimedia.length > 0) {
-                    for (const url of files.multimedia) {
-                        const file = await this.downloadFile(url, 'multimedia');
+                    for (let i = 0; i < files.multimedia.length; i++) {
+                        const url = files.multimedia[i];
+                        const file = await FileUtils.downloadFile(url, 'multimedia');
                         if (file) {
                             try {
                                 const media = MessageMedia.fromFilePath(file.path);
-                                await this.client.sendMessage(chatId, media, { caption: '' });
-                                await this.client.sendMessage(chatId, media, { caption: '' });
+
+                                // Logic for envioMultimediaJunto
+                                let options: any = { caption: '' };
+                                if (envioMultimediaJunto && i === 0 && message) {
+                                    options.caption = message; // Attach message as caption to the first image
+                                    messageSentWithMedia = true;
+                                }
+
+                                await this.client.sendMessage(chatId, media, options);
                                 await metricsService.trackMediaSent(phoneNumber, 'multimedia', tags);
                             } catch (e: any) {
                                 console.error(`[WhatsApp] Error enviando multimedia ${url}:`, e);
@@ -271,15 +240,19 @@ class WhatsAppClient {
                     }
                 }
 
+                // 1. Send text message if exists AND wasn't sent with media
+                if (message && !messageSentWithMedia) {
+                    await this.client.sendMessage(chatId, message);
+                }
+
                 // 3. Process Archivos
                 if (files.archivo && files.archivo.length > 0) {
                     for (const url of files.archivo) {
-                        const file = await this.downloadFile(url, 'archivo');
+                        const file = await FileUtils.downloadFile(url, 'archivo');
                         if (file) {
                             try {
                                 const media = MessageMedia.fromFilePath(file.path);
                                 // Send as document
-                                await this.client.sendMessage(chatId, media, { sendMediaAsDocument: true });
                                 await this.client.sendMessage(chatId, media, { sendMediaAsDocument: true });
                                 await metricsService.trackFileSent(phoneNumber, 'archivo', tags);
                             } catch (e: any) {
@@ -313,13 +286,14 @@ class WhatsAppClient {
         phoneNumbers: string[],
         message: string,
         files: { multimedia?: string[], archivo?: string[] } = {},
-        tags: string[] = []
+        tags: string[] = [],
+        envioMultimediaJunto: boolean = false
     ): Promise<{ success: string[]; failed: string[] }> {
         const results = { success: [] as string[], failed: [] as string[] };
 
         for (const phone of phoneNumbers) {
             try {
-                await this.sendMessage(phone, message, files, 3, tags);
+                await this.sendMessage(phone, message, files, 3, tags, envioMultimediaJunto);
                 results.success.push(phone);
                 console.log(`[WhatsApp] Mensaje enviado a ${phone}`);
                 await metricsService.trackMessageSent(phone, message.length, tags);
@@ -364,7 +338,8 @@ class WhatsAppClient {
         message: string,
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
-        tags: string[] = []
+        tags: string[] = [],
+        envioMultimediaJunto: boolean = false
     ): Promise<string> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
@@ -372,19 +347,25 @@ class WhatsAppClient {
 
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
-                // 1. Send text message if exists
-                if (message) {
-                    await this.client.sendMessage(groupId, message);
-                }
+                let messageSentWithMedia = false;
 
                 // 2. Process Multimedia
                 if (files.multimedia && files.multimedia.length > 0) {
-                    for (const url of files.multimedia) {
-                        const file = await this.downloadFile(url, 'multimedia');
+                    for (let i = 0; i < files.multimedia.length; i++) {
+                        const url = files.multimedia[i];
+                        const file = await FileUtils.downloadFile(url, 'multimedia');
                         if (file) {
                             try {
                                 const media = MessageMedia.fromFilePath(file.path);
-                                await this.client.sendMessage(groupId, media, { caption: '' });
+
+                                // Logic for envioMultimediaJunto
+                                let options: any = { caption: '' };
+                                if (envioMultimediaJunto && i === 0 && message) {
+                                    options.caption = message;
+                                    messageSentWithMedia = true;
+                                }
+
+                                await this.client.sendMessage(groupId, media, options);
                                 await metricsService.trackMediaSent(groupId, 'multimedia', tags);
                             } catch (e: any) {
                                 console.error(`[WhatsApp] Error enviando multimedia al grupo ${groupId}:`, e);
@@ -396,10 +377,15 @@ class WhatsAppClient {
                     }
                 }
 
+                // 1. Send text message if exists AND wasn't sent with media
+                if (message && !messageSentWithMedia) {
+                    await this.client.sendMessage(groupId, message);
+                }
+
                 // 3. Process Archivos
                 if (files.archivo && files.archivo.length > 0) {
                     for (const url of files.archivo) {
-                        const file = await this.downloadFile(url, 'archivo');
+                        const file = await FileUtils.downloadFile(url, 'archivo');
                         if (file) {
                             try {
                                 const media = MessageMedia.fromFilePath(file.path);
