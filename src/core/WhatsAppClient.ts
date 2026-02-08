@@ -1,4 +1,5 @@
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
+import { Server } from 'socket.io';
 import qrTerminal from 'qrcode-terminal';
 import * as fs from 'fs';
 
@@ -10,6 +11,7 @@ class WhatsAppClient {
     private static instance: WhatsAppClient;
     private client: Client;
     private ready: boolean = false;
+    private io: Server | null = null;
 
     private constructor() {
         this.client = new Client({
@@ -29,6 +31,11 @@ class WhatsAppClient {
             WhatsAppClient.instance = new WhatsAppClient();
         }
         return WhatsAppClient.instance;
+    }
+
+    public setSocket(io: Server): void {
+        this.io = io;
+        console.log('[WhatsApp] Socket.io instance set');
     }
 
     private setupEventListeners(): void {
@@ -107,6 +114,18 @@ class WhatsAppClient {
                 console.log(`  - Es de grupo: ${msg.from.includes('@g.us')}`);
                 console.log(`  - Timestamp: ${new Date(msg.timestamp * 1000).toISOString()}`);
                 console.log('========================================');
+
+                if (this.io) {
+                    this.io.emit('whatsapp_message', {
+                        id: msg.id._serialized,
+                        from: msg.from,
+                        body: msg.body,
+                        hasMedia: msg.hasMedia,
+                        timestamp: msg.timestamp,
+                        type: msg.type,
+                        isGroup: msg.from.includes('@g.us')
+                    });
+                }
 
                 // Aquí puedes agregar tu lógica para procesar mensajes entrantes
                 // Por ejemplo, responder automáticamente, guardar en BD, etc.
@@ -321,16 +340,89 @@ class WhatsAppClient {
                 // @ts-ignore - participants exists on GroupChat
                 const participants = chat.participants?.map((p: any) => p.id.user) || [];
 
+                let imageUrl: string | undefined;
+                try {
+                    imageUrl = await this.client.getProfilePicUrl(group.id._serialized);
+                } catch (e) {
+                    console.error(`[WhatsApp] Error obteniendo imagen para grupo ${group.name}:`, e);
+                }
+
                 return {
                     id: group.id._serialized,
                     name: group.name,
-                    participants
+                    participants,
+                    image: imageUrl
                 };
             })
         );
 
         await metricsService.trackGroupsFetched(groupsData.length);
         return groupsData;
+    }
+
+    public async getChats(): Promise<{ name: string; number: string; image?: string }[]> {
+        if (!this.ready) {
+            throw new Error('WhatsApp client not ready');
+        }
+
+        const chats = await this.client.getChats();
+        // Filter for individual chats (not groups)
+        const individualChats = chats.filter(chat => !chat.isGroup);
+
+        const chatsData = await Promise.all(
+            individualChats.map(async (chat) => {
+                let imageUrl: string | undefined;
+                try {
+                    imageUrl = await this.client.getProfilePicUrl(chat.id._serialized);
+                } catch (e) {
+                    // console.error(`[WhatsApp] Error obteniendo imagen para chat ${chat.name}:`, e);
+                }
+
+                return {
+                    name: chat.name,
+                    number: chat.id.user,
+                    image: imageUrl
+                };
+            })
+        );
+
+        return chatsData;
+    }
+
+    public async getMediaFromMessage(messageId: string): Promise<{ data: string; mimetype: string; filename?: string } | null> {
+        if (!this.ready) {
+            throw new Error('WhatsApp client not ready');
+        }
+
+        try {
+            // @ts-ignore - getMessageById might not be in the type definition but exists in the library
+            const msg = await this.client.getMessageById(messageId);
+
+            if (!msg) {
+                console.warn(`[WhatsApp] Message ${messageId} not found`);
+                return null;
+            }
+
+            if (!msg.hasMedia) {
+                console.warn(`[WhatsApp] Message ${messageId} does not contain media`);
+                return null;
+            }
+
+            const media = await msg.downloadMedia();
+            if (!media) {
+                console.warn(`[WhatsApp] Failed to download media for message ${messageId}`);
+                return null;
+            }
+
+            return {
+                data: media.data,
+                mimetype: media.mimetype,
+                filename: media.filename || undefined
+            };
+        } catch (error) {
+            console.error(`[WhatsApp] Error fetching media for message ${messageId}:`, error);
+            throw error;
+        }
     }
 
     public async sendToGroup(

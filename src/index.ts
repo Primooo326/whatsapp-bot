@@ -1,4 +1,6 @@
 import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
 import cors from 'cors';
 import { config } from './config';
 import { connectDatabase } from './database/connection';
@@ -8,11 +10,22 @@ import { errorHandler } from './middlewares/errorHandler';
 import { metricsMiddleware } from './middlewares/metrics.middleware';
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
+});
+
+// Pass socket instance to WhatsAppClient
+whatsAppClient.setSocket(io);
 
 // Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(metricsMiddleware);
+app.use('/public', express.static('public'));
 
 // Routes
 app.use('/api/wha', messageRoutes);
@@ -29,7 +42,7 @@ const startServer = async () => {
         // Initialize WhatsApp client
         await whatsAppClient.initialize();
 
-        app.listen(config.port, () => {
+        server.listen(config.port, () => {
             console.log(`[Server] Running on port ${config.port}`);
             console.log(`[Server] Endpoints:`);
             console.log(`  - GET  /api/wha/health`);

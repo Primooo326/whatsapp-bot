@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { whatsAppClient } from '../core/WhatsAppClient';
-import { SendMessageRequest, SendGroupMessageRequest, ApiResponse, GroupInfo } from '../types';
+import { SendMessageRequest, SendGroupMessageRequest, ApiResponse, GroupInfo, ChatInfo } from '../types';
 import { AppError } from '../middlewares/errorHandler';
 
 class MessageController {
@@ -93,6 +93,28 @@ class MessageController {
         }
     }
 
+    public async getChats(
+        _req: Request,
+        res: Response<ApiResponse<ChatInfo[]>>,
+        next: NextFunction
+    ): Promise<void> {
+        try {
+            if (!whatsAppClient.isReady()) {
+                throw new AppError(503, 'El cliente de WhatsApp no está listo');
+            }
+
+            const chats = await whatsAppClient.getChats();
+
+            res.status(200).json({
+                success: true,
+                message: `Se encontraron ${chats.length} chats`,
+                data: chats
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+
     public async sendToGroup(
         req: Request<object, ApiResponse, SendGroupMessageRequest>,
         res: Response<ApiResponse>,
@@ -131,6 +153,45 @@ class MessageController {
                 success: true,
                 message: 'Mensaje enviado al grupo exitosamente'
             });
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    public async getMedia(
+        req: Request,
+        res: Response,
+        next: NextFunction
+    ): Promise<void> {
+        try {
+            const { id } = req.params;
+
+            if (!id || typeof id !== 'string') {
+                throw new AppError(400, 'El parámetro "id" es requerido y deben ser un string');
+            }
+
+            if (!whatsAppClient.isReady()) {
+                throw new AppError(503, 'El cliente de WhatsApp no está listo');
+            }
+
+            const media = await whatsAppClient.getMediaFromMessage(id);
+
+            if (!media) {
+                throw new AppError(404, 'Media no encontrada o mensaje expirado');
+            }
+
+            // Set headers
+            res.setHeader('Content-Type', media.mimetype);
+            if (media.filename) {
+                res.setHeader('Content-Disposition', `attachment; filename="${media.filename}"`);
+            } else {
+                const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
+                res.setHeader('Content-Disposition', `attachment; filename="${id}.${extension}"`);
+            }
+
+            // Convert base64 to buffer and send
+            const buffer = Buffer.from(media.data, 'base64');
+            res.send(buffer);
         } catch (error) {
             next(error);
         }

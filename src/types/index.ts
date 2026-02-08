@@ -20,6 +20,13 @@ export interface GroupInfo {
     id: string;
     name: string;
     participants: string[];
+    image?: string;
+}
+
+export interface ChatInfo {
+    name: string;
+    number: string;
+    image?: string;
 }
 
 export interface ApiResponse<T = unknown> {

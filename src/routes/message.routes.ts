@@ -21,6 +21,12 @@ router.post('/send', (req, res, next) => messageController.sendMessage(req, res,
 // Get all groups
 router.get('/groups', (req, res, next) => messageController.getGroups(req, res, next));
 
+// Get all chats
+router.get('/chats', (req, res, next) => messageController.getChats(req, res, next));
+
+// Get media by message ID
+router.get('/messages/:id/media', (req, res, next) => messageController.getMedia(req, res, next));
+
 // Send message to a group
 router.post('/groups/send', (req, res, next) => messageController.sendToGroup(req, res, next));
 
