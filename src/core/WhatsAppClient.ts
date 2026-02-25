@@ -94,7 +94,7 @@ class WhatsAppClient {
                             });
 
                             if (response.ok) {
-                                console.log('[Bot] Mensaje enviado al webhook correctamente');
+                                // console.log('[Bot] Mensaje enviado al webhook correctamente');
                             } else {
                                 console.error('[Bot] Error del webhook:', response.status, response.statusText);
                             }
@@ -275,7 +275,7 @@ class WhatsAppClient {
                                 await this.client.sendMessage(chatId, media, { sendMediaAsDocument: true });
                                 await metricsService.trackFileSent(phoneNumber, 'archivo', tags);
                             } catch (e: any) {
-                                console.error(`[WhatsApp] Error enviando archivo ${url}:`, e);
+                                // console.error(`[WhatsApp] Error enviando archivo ${url}:`, e);
                                 await metricsService.trackFileFailed(phoneNumber, e.message, tags);
                             } finally {
                                 // Delete file
@@ -314,11 +314,11 @@ class WhatsAppClient {
             try {
                 await this.sendMessage(phone, message, files, 3, tags, envioMultimediaJunto);
                 results.success.push(phone);
-                console.log(`[WhatsApp] Mensaje enviado a ${phone}`);
+                // console.log(`[WhatsApp] Mensaje enviado a ${phone}`);
                 await metricsService.trackMessageSent(phone, message.length, tags);
             } catch (error: any) {
                 results.failed.push(phone);
-                console.error(`[WhatsApp] Error enviando a ${phone}:`, error);
+                // console.error(`[WhatsApp] Error enviando a ${phone}:`, error);
                 await metricsService.trackMessageFailed(phone, error.message || 'Unknown error', tags);
             }
         }
@@ -484,7 +484,7 @@ class WhatsAppClient {
                                 await this.client.sendMessage(groupId, media, { sendMediaAsDocument: true });
                                 await metricsService.trackFileSent(groupId, 'archivo', tags);
                             } catch (e: any) {
-                                console.error(`[WhatsApp] Error enviando archivo al grupo ${groupId}:`, e);
+                                // console.error(`[WhatsApp] Error enviando archivo al grupo ${groupId}:`, e);
                                 await metricsService.trackFileFailed(groupId, e.message, tags);
                             } finally {
                                 if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
@@ -493,7 +493,7 @@ class WhatsAppClient {
                     }
                 }
 
-                console.log(`[WhatsApp] Mensaje enviado al grupo ${groupId}`);
+                // console.log(`[WhatsApp] Mensaje enviado al grupo ${groupId}`);
                 await metricsService.trackGroupMessageSent(groupId, groupId, message.length, tags);
                 return groupId;
             } catch (error: any) {
