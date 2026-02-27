@@ -5,6 +5,7 @@ export interface SendMessageRequest {
     archivo?: string[];
     tags?: string[];
     envioMultimediaJunto?: boolean;
+    replyMessageId?: string;
 }
 
 export interface SendGroupMessageRequest {
@@ -14,6 +15,7 @@ export interface SendGroupMessageRequest {
     archivo?: string[];
     tags?: string[];
     envioMultimediaJunto?: boolean;
+    replyMessageId?: string;
 }
 
 export interface GroupInfo {

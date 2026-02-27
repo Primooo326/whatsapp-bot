@@ -116,9 +116,21 @@ class WhatsAppClient {
                 console.log('========================================');
 
                 if (this.io) {
+                    let contactName = '';
+                    let contactNumber = '';
+                    try {
+                        const contact = await msg.getContact();
+                        contactName = contact.name || contact.pushname || '';
+                        contactNumber = contact.number || msg.from.split('@')[0];
+                    } catch (e) {
+                        contactNumber = msg.from.split('@')[0];
+                    }
+
                     this.io.emit('whatsapp_message', {
                         id: msg.id._serialized,
                         from: msg.from,
+                        number: contactNumber,
+                        name: contactName,
                         body: msg.body,
                         hasMedia: msg.hasMedia,
                         timestamp: msg.timestamp,
@@ -218,7 +230,8 @@ class WhatsAppClient {
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false
+        envioMultimediaJunto: boolean = false,
+        replyMessageId?: string
     ): Promise<void> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
@@ -241,6 +254,8 @@ class WhatsAppClient {
 
                                 // Logic for envioMultimediaJunto
                                 let options: any = { caption: '' };
+                                if (replyMessageId) options.quotedMessageId = replyMessageId;
+
                                 if (envioMultimediaJunto && i === 0 && message) {
                                     options.caption = message; // Attach message as caption to the first image
                                     messageSentWithMedia = true;
@@ -261,7 +276,20 @@ class WhatsAppClient {
 
                 // 1. Send text message if exists AND wasn't sent with media
                 if (message && !messageSentWithMedia) {
-                    await this.client.sendMessage(chatId, message);
+                    let options: any = {};
+                    if (replyMessageId) {
+                        try {
+                            const quotedMsg = await this.client.getMessageById(replyMessageId);
+                            if (quotedMsg) {
+                                await quotedMsg.reply(message, chatId);
+                                continue; // Skip standard sendMessage since reply() handles it
+                            }
+                        } catch (e) {
+                            console.warn(`[WhatsApp] No se pudo encontrar el mensaje original para responder (ID: ${replyMessageId}), enviando como mensaje normal.`);
+                        }
+                        options.quotedMessageId = replyMessageId;
+                    }
+                    await this.client.sendMessage(chatId, message, options);
                 }
 
                 // 3. Process Archivos
@@ -272,7 +300,10 @@ class WhatsAppClient {
                             try {
                                 const media = MessageMedia.fromFilePath(file.path);
                                 // Send as document
-                                await this.client.sendMessage(chatId, media, { sendMediaAsDocument: true });
+                                let options: any = { sendMediaAsDocument: true };
+                                if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                                await this.client.sendMessage(chatId, media, options);
                                 await metricsService.trackFileSent(phoneNumber, 'archivo', tags);
                             } catch (e: any) {
                                 // console.error(`[WhatsApp] Error enviando archivo ${url}:`, e);
@@ -306,13 +337,14 @@ class WhatsAppClient {
         message: string,
         files: { multimedia?: string[], archivo?: string[] } = {},
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false
+        envioMultimediaJunto: boolean = false,
+        replyMessageId?: string
     ): Promise<{ success: string[]; failed: string[] }> {
         const results = { success: [] as string[], failed: [] as string[] };
 
         for (const phone of phoneNumbers) {
             try {
-                await this.sendMessage(phone, message, files, 3, tags, envioMultimediaJunto);
+                await this.sendMessage(phone, message, files, 3, tags, envioMultimediaJunto, replyMessageId);
                 results.success.push(phone);
                 // console.log(`[WhatsApp] Mensaje enviado a ${phone}`);
                 await metricsService.trackMessageSent(phone, message.length, tags);
@@ -431,7 +463,8 @@ class WhatsAppClient {
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false
+        envioMultimediaJunto: boolean = false,
+        replyMessageId?: string
     ): Promise<string> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
@@ -452,6 +485,8 @@ class WhatsAppClient {
 
                                 // Logic for envioMultimediaJunto
                                 let options: any = { caption: '' };
+                                if (replyMessageId) options.quotedMessageId = replyMessageId;
+
                                 if (envioMultimediaJunto && i === 0 && message) {
                                     options.caption = message;
                                     messageSentWithMedia = true;
@@ -471,7 +506,20 @@ class WhatsAppClient {
 
                 // 1. Send text message if exists AND wasn't sent with media
                 if (message && !messageSentWithMedia) {
-                    await this.client.sendMessage(groupId, message);
+                    let options: any = {};
+                    if (replyMessageId) {
+                        try {
+                            const quotedMsg = await this.client.getMessageById(replyMessageId);
+                            if (quotedMsg) {
+                                await quotedMsg.reply(message, groupId);
+                                continue;
+                            }
+                        } catch (e) {
+                            console.warn(`[WhatsApp] No se pudo encontrar el mensaje original para responder (ID: ${replyMessageId}), enviando como mensaje normal.`);
+                        }
+                        options.quotedMessageId = replyMessageId;
+                    }
+                    await this.client.sendMessage(groupId, message, options);
                 }
 
                 // 3. Process Archivos
@@ -481,7 +529,10 @@ class WhatsAppClient {
                         if (file) {
                             try {
                                 const media = MessageMedia.fromFilePath(file.path);
-                                await this.client.sendMessage(groupId, media, { sendMediaAsDocument: true });
+                                let options: any = { sendMediaAsDocument: true };
+                                if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                                await this.client.sendMessage(groupId, media, options);
                                 await metricsService.trackFileSent(groupId, 'archivo', tags);
                             } catch (e: any) {
                                 // console.error(`[WhatsApp] Error enviando archivo al grupo ${groupId}:`, e);
