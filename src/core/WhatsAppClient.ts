@@ -1,6 +1,7 @@
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import { Server } from 'socket.io';
 import * as fs from 'fs';
+import * as qrTerminal from 'qrcode-terminal';
 
 import { config } from '../config';
 import { metricsService } from '../services/metrics.service';
@@ -41,7 +42,7 @@ class WhatsAppClient {
     private setupEventListeners(): void {
         this.client.on('qr', (qr) => {
             console.log('[WhatsApp] Escanea este código QR con tu teléfono (Socket actualizado):');
-            // qrTerminal.generate(qr, { small: true }); // Para la consola
+            qrTerminal.generate(qr, { small: true }); // Para la consola
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'UNAUTHENTICATED' });
                 this.io.emit('whatsapp_qr', { qr });
@@ -110,6 +111,36 @@ class WhatsAppClient {
                     contactNumber = msg.from.split('@')[0];
                 }
 
+                let quotedMessageData = null;
+                if (msg.hasQuotedMsg) {
+                    try {
+                        const quotedMsg = await msg.getQuotedMessage();
+                        let quotedContactName = '';
+                        let quotedContactNumber = '';
+
+                        try {
+                            const quotedContact = await quotedMsg.getContact();
+                            quotedContactName = quotedContact.name || quotedContact.pushname || '';
+                            quotedContactNumber = quotedContact.number || quotedMsg.from?.split('@')[0] || '';
+                        } catch (e) {
+                            quotedContactNumber = quotedMsg.from?.split('@')[0] || '';
+                        }
+
+                        quotedMessageData = {
+                            id: quotedMsg.id?._serialized,
+                            from: quotedMsg.from,
+                            number: quotedContactNumber,
+                            name: quotedContactName,
+                            body: quotedMsg.body,
+                            hasMedia: quotedMsg.hasMedia,
+                            timestamp: quotedMsg.timestamp,
+                            type: quotedMsg.type
+                        };
+                    } catch (e) {
+                        console.error('[WhatsApp] Error obteniendo mensaje citado:', e);
+                    }
+                }
+
                 this.io.emit('whatsapp_message', {
                     id: msg.id._serialized,
                     from: msg.from,
@@ -119,7 +150,9 @@ class WhatsAppClient {
                     hasMedia: msg.hasMedia,
                     timestamp: msg.timestamp,
                     type: msg.type,
-                    isGroup: msg.from.includes('@g.us')
+                    isGroup: msg.from.includes('@g.us'),
+                    hasQuotedMsg: msg.hasQuotedMsg,
+                    quotedMessage: quotedMessageData
                 });
             }
 
@@ -151,13 +184,22 @@ class WhatsAppClient {
         console.log('[WhatsApp] Inicializando cliente...');
 
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Timeout: WhatsApp client failed to become ready within 5 minutes'));
-            }, 300000); // 5 minutos de timeout para escaneo de QR
+            // const timeout = setTimeout(() => {
+            //     reject(new Error('Timeout: WhatsApp client failed to become ready within 5 minutes'));
+            // }, 3000); // 5 minutos de timeout para escaneo de QR
+
+            this.client.on('qr', (qr) => {
+                console.log('[WhatsApp] Escanea este código QR con tu teléfono (Socket actualizado):');
+                qrTerminal.generate(qr, { small: true }); // Para la consola
+                if (this.io) {
+                    this.io.emit('whatsapp_status', { state: 'UNAUTHENTICATED' });
+                    this.io.emit('whatsapp_qr', { qr });
+                }
+            });
 
             this.client.once('ready', () => {
                 console.log('[WhatsApp] Cliente listo (evento ready)');
-                clearTimeout(timeout);
+                // clearTimeout(timeout);
                 this.ready = true;
                 resolve();
             });
@@ -171,7 +213,7 @@ class WhatsAppClient {
                     if (this.ready) return;
 
                     console.log('[WhatsApp] Evento ready no recibido después de 60s, marcando como listo...');
-                    clearTimeout(timeout);
+                    // clearTimeout(timeout);
                     this.ready = true;
 
                     resolve();
@@ -179,12 +221,12 @@ class WhatsAppClient {
             });
 
             this.client.once('auth_failure', (msg) => {
-                clearTimeout(timeout);
+                // clearTimeout(timeout);
                 reject(new Error(`Auth failure: ${msg}`));
             });
 
             this.client.initialize().catch((error) => {
-                clearTimeout(timeout);
+                // clearTimeout(timeout);
                 reject(error);
             });
         });
