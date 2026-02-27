@@ -96,6 +96,9 @@ class WhatsAppClient {
         });
 
         this.client.on('message_create', async (msg) => {
+            // Ignorar los mensajes enviados por nosotros mismos
+            if (msg.fromMe) return;
+
             if (this.io) {
                 let contactName = '';
                 let contactNumber = '';
