@@ -1,6 +1,5 @@
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import { Server } from 'socket.io';
-import qrTerminal from 'qrcode-terminal';
 import * as fs from 'fs';
 
 import { config } from '../config';
@@ -17,6 +16,7 @@ class WhatsAppClient {
         this.client = new Client({
             authStrategy: new LocalAuth({ clientId: config.sessionId }),
             puppeteer: config.puppeteer,
+            qrMaxRetries: 0, // 0 = unlimited retries
             webVersionCache: {
                 type: 'remote',
                 remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
@@ -40,117 +40,86 @@ class WhatsAppClient {
 
     private setupEventListeners(): void {
         this.client.on('qr', (qr) => {
-            console.log('[WhatsApp] Escanea este código QR con tu teléfono:');
-            qrTerminal.generate(qr, { small: true });
+            console.log('[WhatsApp] Escanea este código QR con tu teléfono (Socket actualizado):');
+            // qrTerminal.generate(qr, { small: true }); // Para la consola
+            if (this.io) {
+                this.io.emit('whatsapp_status', { state: 'UNAUTHENTICATED' });
+                this.io.emit('whatsapp_qr', { qr });
+            }
         });
 
         this.client.on('loading_screen', (percent, message) => {
             console.log(`[WhatsApp] Cargando: ${percent}% - ${message}`);
+            if (this.io) {
+                this.io.emit('whatsapp_status', { state: 'LOADING', percent, message });
+            }
         });
 
         this.client.on('authenticated', () => {
             console.log('[WhatsApp] Autenticado con éxito');
+            if (this.io) {
+                this.io.emit('whatsapp_status', { state: 'AUTHENTICATED' });
+            }
         });
 
         this.client.on('auth_failure', (msg) => {
             console.error('[WhatsApp] Error de autenticación:', msg);
+            if (this.io) {
+                this.io.emit('whatsapp_status', { state: 'AUTHENTICATION_FAILED', message: msg });
+            }
         });
 
         this.client.on('ready', async () => {
             console.log('[WhatsApp] Cliente listo (evento ready)');
             this.ready = true;
+            if (this.io) {
+                this.io.emit('whatsapp_status', { state: 'CONNECTED' });
+            }
             await metricsService.trackClientStatus('ready');
         });
 
-        // @ts-ignore - Este evento existe en algunas versiones
+        // @ts-ignore
         this.client.on('change_state', (state: string) => {
             console.log(`[WhatsApp] Estado cambiado a: ${state}`);
+            if (this.io) {
+                this.io.emit('whatsapp_status', { state });
+            }
         });
 
         this.client.on('disconnected', async (reason) => {
             console.log('[WhatsApp] Desconectado:', reason);
             this.ready = false;
+            if (this.io) {
+                this.io.emit('whatsapp_status', { state: 'DISCONNECTED', reason });
+            }
             await metricsService.trackClientStatus('disconnected', reason);
         });
 
-        // Evento 'message_create': Captura TODOS los mensajes (propios y recibidos)
-        // Usamos este en lugar de 'message' porque en versiones alpha 'message' puede no emitirse
         this.client.on('message_create', async (msg) => {
-            // Mensajes PROPIOS: detectar comandos como /financer
-            if (msg.fromMe) {
-                if (msg.body?.startsWith('/financer')) {
-                    const mensaje = msg.body.replace('/financer', '').trim();
-
-                    if (mensaje) {
-                        console.log(`[Bot] Comando /financer detectado: "${mensaje}"`);
-
-                        try {
-                            const response = await fetch('https://n8n.primooo.dev/webhook/bot-financer', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({ mensaje })
-                            });
-
-                            if (response.ok) {
-                                // console.log('[Bot] Mensaje enviado al webhook correctamente');
-                            } else {
-                                console.error('[Bot] Error del webhook:', response.status, response.statusText);
-                            }
-                        } catch (error: any) {
-                            console.error('[Bot] Error enviando al webhook:', error.message);
-                        }
-                    }
-                }
-            } else {
-                // Mensajes RECIBIDOS de otros
-                console.log('========================================');
-                console.log('[WhatsApp] 📩 MENSAJE RECIBIDO:');
-                console.log(`  - De: ${msg.from}`);
-                console.log(`  - Tipo: ${msg.type}`);
-                console.log(`  - Cuerpo: ${msg.body?.substring(0, 100) || '(sin texto)'}${(msg.body?.length || 0) > 100 ? '...' : ''}`);
-                console.log(`  - Tiene media: ${msg.hasMedia}`);
-                console.log(`  - Es de grupo: ${msg.from.includes('@g.us')}`);
-                console.log(`  - Timestamp: ${new Date(msg.timestamp * 1000).toISOString()}`);
-                console.log('========================================');
-
-                if (this.io) {
-                    let contactName = '';
-                    let contactNumber = '';
-                    try {
-                        const contact = await msg.getContact();
-                        contactName = contact.name || contact.pushname || '';
-                        contactNumber = contact.number || msg.from.split('@')[0];
-                    } catch (e) {
-                        contactNumber = msg.from.split('@')[0];
-                    }
-
-                    this.io.emit('whatsapp_message', {
-                        id: msg.id._serialized,
-                        from: msg.from,
-                        number: contactNumber,
-                        name: contactName,
-                        body: msg.body,
-                        hasMedia: msg.hasMedia,
-                        timestamp: msg.timestamp,
-                        type: msg.type,
-                        isGroup: msg.from.includes('@g.us')
-                    });
+            if (this.io) {
+                let contactName = '';
+                let contactNumber = '';
+                try {
+                    const contact = await msg.getContact();
+                    contactName = contact.name || contact.pushname || '';
+                    contactNumber = contact.number || msg.from.split('@')[0];
+                } catch (e) {
+                    contactNumber = msg.from.split('@')[0];
                 }
 
-                // Aquí puedes agregar tu lógica para procesar mensajes entrantes
-                // Por ejemplo, responder automáticamente, guardar en BD, etc.
-
-                // Ejemplo: detectar comandos entrantes (con prefijo !)
-                if (msg.body?.startsWith('!')) {
-                    const comando = msg.body.split(' ')[0].toLowerCase();
-                    console.log(`[WhatsApp] Comando detectado: ${comando}`);
-
-                    // Puedes emitir eventos o llamar a handlers específicos aquí
-                    // this.handleIncomingCommand(msg, comando);
-                }
+                this.io.emit('whatsapp_message', {
+                    id: msg.id._serialized,
+                    from: msg.from,
+                    number: contactNumber,
+                    name: contactName,
+                    body: msg.body,
+                    hasMedia: msg.hasMedia,
+                    timestamp: msg.timestamp,
+                    type: msg.type,
+                    isGroup: msg.from.includes('@g.us')
+                });
             }
+
         });
 
         // Capturar errores internos de la librería (conocido bug con 'update' undefined)
