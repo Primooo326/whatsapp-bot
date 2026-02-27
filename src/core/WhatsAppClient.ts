@@ -277,19 +277,22 @@ class WhatsAppClient {
                 // 1. Send text message if exists AND wasn't sent with media
                 if (message && !messageSentWithMedia) {
                     let options: any = {};
+                    let replied = false;
                     if (replyMessageId) {
                         try {
                             const quotedMsg = await this.client.getMessageById(replyMessageId);
                             if (quotedMsg) {
                                 await quotedMsg.reply(message, chatId);
-                                continue; // Skip standard sendMessage since reply() handles it
+                                replied = true;
                             }
                         } catch (e) {
                             console.warn(`[WhatsApp] No se pudo encontrar el mensaje original para responder (ID: ${replyMessageId}), enviando como mensaje normal.`);
                         }
                         options.quotedMessageId = replyMessageId;
                     }
-                    await this.client.sendMessage(chatId, message, options);
+                    if (!replied) {
+                        await this.client.sendMessage(chatId, message, options);
+                    }
                 }
 
                 // 3. Process Archivos
@@ -507,19 +510,22 @@ class WhatsAppClient {
                 // 1. Send text message if exists AND wasn't sent with media
                 if (message && !messageSentWithMedia) {
                     let options: any = {};
+                    let replied = false;
                     if (replyMessageId) {
                         try {
                             const quotedMsg = await this.client.getMessageById(replyMessageId);
                             if (quotedMsg) {
                                 await quotedMsg.reply(message, groupId);
-                                continue;
+                                replied = true;
                             }
                         } catch (e) {
                             console.warn(`[WhatsApp] No se pudo encontrar el mensaje original para responder (ID: ${replyMessageId}), enviando como mensaje normal.`);
                         }
                         options.quotedMessageId = replyMessageId;
                     }
-                    await this.client.sendMessage(groupId, message, options);
+                    if (!replied) {
+                        await this.client.sendMessage(groupId, message, options);
+                    }
                 }
 
                 // 3. Process Archivos
