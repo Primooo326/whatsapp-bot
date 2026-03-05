@@ -14,7 +14,7 @@ class MessageController {
 
             // Validación
             if (!to || !Array.isArray(to) || to.length === 0) {
-                throw new AppError(400, 'El campo "to" es requerido y debe ser un array de números');
+                throw new AppError(400, 'El campo "to" es requerido y debe ser un array de números o IDs');
             }
 
             if (!message && (!multimedia || multimedia.length === 0) && (!archivo || archivo.length === 0)) {

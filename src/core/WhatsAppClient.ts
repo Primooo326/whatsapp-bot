@@ -251,7 +251,7 @@ class WhatsAppClient {
             throw new Error('WhatsApp client not ready');
         }
 
-        const chatId = phoneNumber.replace(/\D/g, '') + '@c.us';
+        const chatId = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber.replace(/\D/g, '')}@c.us`;
 
         for (let attempt = 1; attempt <= retries; attempt++) {
             try {
