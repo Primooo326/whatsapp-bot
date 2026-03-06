@@ -39,9 +39,6 @@ const startServer = async () => {
         // Connect to MongoDB
         await connectDatabase();
 
-        // Initialize WhatsApp client
-        await whatsAppClient.initialize();
-
         server.listen(config.port, () => {
             console.log(`[Server] Running on port ${config.port}`);
             console.log(`[Server] Endpoints:`);
@@ -52,6 +49,9 @@ const startServer = async () => {
             console.log(`  - GET  /api/wha/metrics`);
             console.log(`  - GET  /api/wha/metrics/range`);
         });
+
+        // Initialize WhatsApp client
+        await whatsAppClient.initialize();
     } catch (error) {
         console.error('[Server] Error starting:', error);
         process.exit(1);
