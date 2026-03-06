@@ -113,32 +113,7 @@ class WhatsAppClient {
 
                 let quotedMessageData = null;
                 if (msg.hasQuotedMsg) {
-                    try {
-                        const quotedMsg = await msg.getQuotedMessage();
-                        let quotedContactName = '';
-                        let quotedContactNumber = '';
-
-                        try {
-                            const quotedContact = await quotedMsg.getContact();
-                            quotedContactName = quotedContact.name || quotedContact.pushname || '';
-                            quotedContactNumber = quotedContact.number || quotedMsg.from?.split('@')[0] || '';
-                        } catch (e) {
-                            quotedContactNumber = quotedMsg.from?.split('@')[0] || '';
-                        }
-
-                        quotedMessageData = {
-                            id: quotedMsg.id?._serialized,
-                            from: quotedMsg.from,
-                            number: quotedContactNumber,
-                            name: quotedContactName,
-                            body: quotedMsg.body,
-                            hasMedia: quotedMsg.hasMedia,
-                            timestamp: quotedMsg.timestamp,
-                            type: quotedMsg.type
-                        };
-                    } catch (e) {
-                        console.error('[WhatsApp] Error obteniendo mensaje citado:', e);
-                    }
+                    quotedMessageData = await this.getQuotedMessageChain(msg);
                 }
 
                 this.io.emit('whatsapp_message', {
@@ -178,6 +153,45 @@ class WhatsAppClient {
         });
 
         console.log('[WhatsApp] Event listeners registrados correctamente');
+    }
+
+    private async getQuotedMessageChain(msg: any, depth = 0, maxDepth = 10): Promise<any> {
+        if (!msg.hasQuotedMsg || depth >= maxDepth) return null;
+        try {
+            const quotedMsg = await msg.getQuotedMessage();
+            if (!quotedMsg) return null;
+
+            let quotedContactName = '';
+            let quotedContactNumber = '';
+            try {
+                const quotedContact = await quotedMsg.getContact();
+                quotedContactName = quotedContact.name || quotedContact.pushname || '';
+                quotedContactNumber = quotedContact.number || quotedMsg.from?.split('@')[0] || '';
+            } catch (e) {
+                quotedContactNumber = quotedMsg.from?.split('@')[0] || '';
+            }
+
+            let nestedQuoted = null;
+            if (quotedMsg.hasQuotedMsg) {
+                nestedQuoted = await this.getQuotedMessageChain(quotedMsg, depth + 1, maxDepth);
+            }
+
+            return {
+                id: quotedMsg.id?._serialized,
+                from: quotedMsg.from,
+                number: quotedContactNumber,
+                name: quotedContactName,
+                body: quotedMsg.body,
+                hasMedia: quotedMsg.hasMedia,
+                timestamp: quotedMsg.timestamp,
+                type: quotedMsg.type,
+                hasQuotedMsg: quotedMsg.hasQuotedMsg,
+                quotedMessage: nestedQuoted
+            };
+        } catch (e) {
+            console.error('[WhatsApp] Error obteniendo cadena de mensajes citados:', e);
+            return null;
+        }
     }
 
     public async initialize(): Promise<void> {
@@ -291,22 +305,10 @@ class WhatsAppClient {
                 // 1. Send text message if exists AND wasn't sent with media
                 if (message && !messageSentWithMedia) {
                     let options: any = {};
-                    let replied = false;
                     if (replyMessageId) {
-                        try {
-                            const quotedMsg = await this.client.getMessageById(replyMessageId);
-                            if (quotedMsg) {
-                                await quotedMsg.reply(message, chatId);
-                                replied = true;
-                            }
-                        } catch (e) {
-                            console.warn(`[WhatsApp] No se pudo encontrar el mensaje original para responder (ID: ${replyMessageId}), enviando como mensaje normal.`);
-                        }
                         options.quotedMessageId = replyMessageId;
                     }
-                    if (!replied) {
-                        await this.client.sendMessage(chatId, message, options);
-                    }
+                    await this.client.sendMessage(chatId, message, options);
                 }
 
                 // 3. Process Archivos
@@ -524,22 +526,10 @@ class WhatsAppClient {
                 // 1. Send text message if exists AND wasn't sent with media
                 if (message && !messageSentWithMedia) {
                     let options: any = {};
-                    let replied = false;
                     if (replyMessageId) {
-                        try {
-                            const quotedMsg = await this.client.getMessageById(replyMessageId);
-                            if (quotedMsg) {
-                                await quotedMsg.reply(message, groupId);
-                                replied = true;
-                            }
-                        } catch (e) {
-                            console.warn(`[WhatsApp] No se pudo encontrar el mensaje original para responder (ID: ${replyMessageId}), enviando como mensaje normal.`);
-                        }
                         options.quotedMessageId = replyMessageId;
                     }
-                    if (!replied) {
-                        await this.client.sendMessage(groupId, message, options);
-                    }
+                    await this.client.sendMessage(groupId, message, options);
                 }
 
                 // 3. Process Archivos
