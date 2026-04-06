@@ -198,10 +198,6 @@ class WhatsAppClient {
         console.log('[WhatsApp] Inicializando cliente...');
 
         return new Promise((resolve, reject) => {
-            // const timeout = setTimeout(() => {
-            //     reject(new Error('Timeout: WhatsApp client failed to become ready within 5 minutes'));
-            // }, 3000); // 5 minutos de timeout para escaneo de QR
-
             this.client.on('qr', (qr) => {
                 console.log('[WhatsApp] Escanea este código QR con tu teléfono (Socket actualizado):');
                 qrTerminal.generate(qr, { small: true }); // Para la consola
@@ -209,11 +205,12 @@ class WhatsAppClient {
                     this.io.emit('whatsapp_status', { state: 'UNAUTHENTICATED' });
                     this.io.emit('whatsapp_qr', { qr });
                 }
+                // Permitimos que la configuración de Express/Node continúe
+                resolve();
             });
 
             this.client.once('ready', () => {
                 console.log('[WhatsApp] Cliente listo (evento ready)');
-                // clearTimeout(timeout);
                 this.ready = true;
                 resolve();
             });
@@ -222,25 +219,19 @@ class WhatsAppClient {
             this.client.once('authenticated', () => {
                 console.log('[WhatsApp] Autenticado, esperando evento ready...');
 
-                // Después de 60 segundos, si ready no llegó, marcar como listo de todas formas
                 setTimeout(() => {
                     if (this.ready) return;
-
                     console.log('[WhatsApp] Evento ready no recibido después de 60s, marcando como listo...');
-                    // clearTimeout(timeout);
                     this.ready = true;
-
                     resolve();
                 }, 60000);
             });
 
             this.client.once('auth_failure', (msg) => {
-                // clearTimeout(timeout);
                 reject(new Error(`Auth failure: ${msg}`));
             });
 
             this.client.initialize().catch((error) => {
-                // clearTimeout(timeout);
                 reject(error);
             });
         });
@@ -250,7 +241,29 @@ class WhatsAppClient {
         return this.ready;
     }
 
-
+    private async sendWithRetry(
+        targetId: string,
+        content: string | MessageMedia,
+        options: any,
+        retries: number
+    ): Promise<void> {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                await this.client.sendMessage(targetId, content, options);
+                return; // Éxito
+            } catch (error: any) {
+                const isUpdateError = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
+                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')");
+                if (isUpdateError && attempt < retries) {
+                    const delay = attempt * 2000;
+                    console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    throw error;
+                }
+            }
+        }
+    }
 
     public async sendMessage(
         phoneNumber: string,
@@ -266,86 +279,80 @@ class WhatsAppClient {
         }
 
         const chatId = phoneNumber.includes('@') ? phoneNumber : `${phoneNumber.replace(/\D/g, '')}@c.us`;
+        let messageSentWithMedia = false;
 
-        for (let attempt = 1; attempt <= retries; attempt++) {
+        // 1. Procesar Multimedia
+        if (files.multimedia && files.multimedia.length > 0) {
+            for (let i = 0; i < files.multimedia.length; i++) {
+                const url = files.multimedia[i];
+                const file = await FileUtils.downloadFile(url, 'multimedia');
+                if (file) {
+                    try {
+                        const stats = fs.statSync(file.path);
+                        if (stats.size > 50 * 1024 * 1024) {
+                            throw new Error('El archivo excede el límite de 50MB');
+                        }
+
+                        const media = MessageMedia.fromFilePath(file.path);
+                        let options: any = { caption: '' };
+                        if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                        const isFirst = (envioMultimediaJunto && i === 0 && message);
+                        if (isFirst) {
+                            options.caption = message; // Attach message as caption
+                        }
+
+                        await this.sendWithRetry(chatId, media, options, retries);
+
+                        // Solo marcamos el mensaje como enviado si tuvimos éxito enviando la imagen
+                        if (isFirst) {
+                            messageSentWithMedia = true;
+                        }
+
+                        await metricsService.trackMediaSent(phoneNumber, 'multimedia', tags);
+                    } catch (e: any) {
+                        console.error(`[WhatsApp] Error enviando multimedia ${url} a ${phoneNumber}:`, e);
+                        await metricsService.trackMediaFailed(phoneNumber, e.message, tags);
+                        // No lanzamos el error para no colgar todo, pero el mensaje original (si tenía) sí se enviará después al fallar messageSentWithMedia
+                    } finally {
+                        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                    }
+                }
+            }
+        }
+
+        // 2. Enviar mensaje de texto si no se adjuntó junto a multimedia
+        if (message && !messageSentWithMedia) {
+            let options: any = {};
+            if (replyMessageId) options.quotedMessageId = replyMessageId;
             try {
-                let messageSentWithMedia = false;
+                await this.sendWithRetry(chatId, message, options, retries);
+            } catch (e: any) {
+                console.error(`[WhatsApp] Error enviando mensaje de texto a ${phoneNumber}:`, e);
+            }
+        }
 
-                // 2. Process Multimedia
-                if (files.multimedia && files.multimedia.length > 0) {
-                    for (let i = 0; i < files.multimedia.length; i++) {
-                        const url = files.multimedia[i];
-                        const file = await FileUtils.downloadFile(url, 'multimedia');
-                        if (file) {
-                            try {
-                                const media = MessageMedia.fromFilePath(file.path);
+        // 3. Procesar Archivos (sin caption)
+        if (files.archivo && files.archivo.length > 0) {
+            for (const url of files.archivo) {
+                const file = await FileUtils.downloadFile(url, 'archivo');
+                if (file) {
+                    try {
+                        const stats = fs.statSync(file.path);
+                        if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                                // Logic for envioMultimediaJunto
-                                let options: any = { caption: '' };
-                                if (replyMessageId) options.quotedMessageId = replyMessageId;
+                        const media = MessageMedia.fromFilePath(file.path);
+                        let options: any = { sendMediaAsDocument: true };
+                        if (replyMessageId) options.quotedMessageId = replyMessageId;
 
-                                if (envioMultimediaJunto && i === 0 && message) {
-                                    options.caption = message; // Attach message as caption to the first image
-                                    messageSentWithMedia = true;
-                                }
-
-                                await this.client.sendMessage(chatId, media, options);
-                                await metricsService.trackMediaSent(phoneNumber, 'multimedia', tags);
-                            } catch (e: any) {
-                                console.error(`[WhatsApp] Error enviando multimedia ${url}:`, e);
-                                await metricsService.trackMediaFailed(phoneNumber, e.message, tags);
-                            } finally {
-                                // Delete file
-                                if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-                            }
-                        }
+                        await this.sendWithRetry(chatId, media, options, retries);
+                        await metricsService.trackFileSent(phoneNumber, 'archivo', tags);
+                    } catch (e: any) {
+                        console.error(`[WhatsApp] Error enviando archivo ${url} a ${phoneNumber}:`, e);
+                        await metricsService.trackFileFailed(phoneNumber, e.message, tags);
+                    } finally {
+                        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
                     }
-                }
-
-                // 1. Send text message if exists AND wasn't sent with media
-                if (message && !messageSentWithMedia) {
-                    let options: any = {};
-                    if (replyMessageId) {
-                        options.quotedMessageId = replyMessageId;
-                    }
-                    await this.client.sendMessage(chatId, message, options);
-                }
-
-                // 3. Process Archivos
-                if (files.archivo && files.archivo.length > 0) {
-                    for (const url of files.archivo) {
-                        const file = await FileUtils.downloadFile(url, 'archivo');
-                        if (file) {
-                            try {
-                                const media = MessageMedia.fromFilePath(file.path);
-                                // Send as document
-                                let options: any = { sendMediaAsDocument: true };
-                                if (replyMessageId) options.quotedMessageId = replyMessageId;
-
-                                await this.client.sendMessage(chatId, media, options);
-                                await metricsService.trackFileSent(phoneNumber, 'archivo', tags);
-                            } catch (e: any) {
-                                // console.error(`[WhatsApp] Error enviando archivo ${url}:`, e);
-                                await metricsService.trackFileFailed(phoneNumber, e.message, tags);
-                            } finally {
-                                // Delete file
-                                if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-                            }
-                        }
-                    }
-                }
-
-                return; // Success
-            } catch (error: any) {
-                const isUpdateError = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
-                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')");
-
-                if (isUpdateError && attempt < retries) {
-                    const delay = attempt * 2000;
-                    console.log(`[WhatsApp] Reintentando envío (${attempt}/${retries}) en ${delay / 1000}s...`);
-                    await new Promise(r => setTimeout(r, delay));
-                } else {
-                    throw error;
                 }
             }
         }
@@ -356,7 +363,7 @@ class WhatsAppClient {
         message: string,
         files: { multimedia?: string[], archivo?: string[] } = {},
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false,
+        envioMultimediaJunto: boolean = true,
         replyMessageId?: string
     ): Promise<{ success: string[]; failed: string[] }> {
         const results = { success: [] as string[], failed: [] as string[] };
@@ -489,89 +496,82 @@ class WhatsAppClient {
             throw new Error('WhatsApp client not ready');
         }
 
-        for (let attempt = 1; attempt <= retries; attempt++) {
-            try {
-                let messageSentWithMedia = false;
+        let messageSentWithMedia = false;
 
-                // 2. Process Multimedia
-                if (files.multimedia && files.multimedia.length > 0) {
-                    for (let i = 0; i < files.multimedia.length; i++) {
-                        const url = files.multimedia[i];
-                        const file = await FileUtils.downloadFile(url, 'multimedia');
-                        if (file) {
-                            try {
-                                const media = MessageMedia.fromFilePath(file.path);
+        // 1. Procesar Multimedia
+        if (files.multimedia && files.multimedia.length > 0) {
+            for (let i = 0; i < files.multimedia.length; i++) {
+                const url = files.multimedia[i];
+                const file = await FileUtils.downloadFile(url, 'multimedia');
+                if (file) {
+                    try {
+                        const stats = fs.statSync(file.path);
+                        if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                                // Logic for envioMultimediaJunto
-                                let options: any = { caption: '' };
-                                if (replyMessageId) options.quotedMessageId = replyMessageId;
+                        const media = MessageMedia.fromFilePath(file.path);
+                        let options: any = { caption: '' };
+                        if (replyMessageId) options.quotedMessageId = replyMessageId;
 
-                                if (envioMultimediaJunto && i === 0 && message) {
-                                    options.caption = message;
-                                    messageSentWithMedia = true;
-                                }
-
-                                await this.client.sendMessage(groupId, media, options);
-                                await metricsService.trackMediaSent(groupId, 'multimedia', tags);
-                            } catch (e: any) {
-                                console.error(`[WhatsApp] Error enviando multimedia al grupo ${groupId}:`, e);
-                                await metricsService.trackMediaFailed(groupId, e.message, tags);
-                            } finally {
-                                if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-                            }
+                        const isFirst = (envioMultimediaJunto && i === 0 && message);
+                        if (isFirst) {
+                            options.caption = message; // Attach message as caption to the first image
                         }
-                    }
-                }
 
-                // 1. Send text message if exists AND wasn't sent with media
-                if (message && !messageSentWithMedia) {
-                    let options: any = {};
-                    if (replyMessageId) {
-                        options.quotedMessageId = replyMessageId;
-                    }
-                    await this.client.sendMessage(groupId, message, options);
-                }
+                        await this.sendWithRetry(groupId, media, options, retries);
 
-                // 3. Process Archivos
-                if (files.archivo && files.archivo.length > 0) {
-                    for (const url of files.archivo) {
-                        const file = await FileUtils.downloadFile(url, 'archivo');
-                        if (file) {
-                            try {
-                                const media = MessageMedia.fromFilePath(file.path);
-                                let options: any = { sendMediaAsDocument: true };
-                                if (replyMessageId) options.quotedMessageId = replyMessageId;
-
-                                await this.client.sendMessage(groupId, media, options);
-                                await metricsService.trackFileSent(groupId, 'archivo', tags);
-                            } catch (e: any) {
-                                // console.error(`[WhatsApp] Error enviando archivo al grupo ${groupId}:`, e);
-                                await metricsService.trackFileFailed(groupId, e.message, tags);
-                            } finally {
-                                if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-                            }
+                        if (isFirst) {
+                            messageSentWithMedia = true;
                         }
+
+                        await metricsService.trackMediaSent(groupId, 'multimedia', tags);
+                    } catch (e: any) {
+                        console.error(`[WhatsApp] Error enviando multimedia al grupo ${groupId}:`, e);
+                        await metricsService.trackMediaFailed(groupId, e.message, tags);
+                    } finally {
+                        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
                     }
-                }
-
-                // console.log(`[WhatsApp] Mensaje enviado al grupo ${groupId}`);
-                await metricsService.trackGroupMessageSent(groupId, groupId, message.length, tags);
-                return groupId;
-            } catch (error: any) {
-                const isUpdateError = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
-                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')");
-
-                if (isUpdateError && attempt < retries) {
-                    const delay = attempt * 2000;
-                    console.log(`[WhatsApp] Reintentando envío a grupo (${attempt}/${retries}) en ${delay / 1000}s...`);
-                    await new Promise(r => setTimeout(r, delay));
-                } else {
-                    await metricsService.trackGroupMessageFailed(groupId, error.message || 'Unknown error', tags);
-                    throw error;
                 }
             }
         }
-        throw new Error('No se pudo enviar el mensaje al grupo después de varios intentos');
+
+        // 2. Enviar mensaje de texto
+        if (message && !messageSentWithMedia) {
+            let options: any = {};
+            if (replyMessageId) options.quotedMessageId = replyMessageId;
+            try {
+                await this.sendWithRetry(groupId, message, options, retries);
+            } catch (e: any) {
+                console.error(`[WhatsApp] Error enviando mensaje de texto al grupo ${groupId}:`, e);
+            }
+        }
+
+        // 3. Procesar Archivos
+        if (files.archivo && files.archivo.length > 0) {
+            for (const url of files.archivo) {
+                const file = await FileUtils.downloadFile(url, 'archivo');
+                if (file) {
+                    try {
+                        const stats = fs.statSync(file.path);
+                        if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
+
+                        const media = MessageMedia.fromFilePath(file.path);
+                        let options: any = { sendMediaAsDocument: true };
+                        if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                        await this.sendWithRetry(groupId, media, options, retries);
+                        await metricsService.trackFileSent(groupId, 'archivo', tags);
+                    } catch (e: any) {
+                        console.error(`[WhatsApp] Error enviando archivo al grupo ${groupId}:`, e);
+                        await metricsService.trackFileFailed(groupId, e.message, tags);
+                    } finally {
+                        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                    }
+                }
+            }
+        }
+
+        await metricsService.trackGroupMessageSent(groupId, groupId, message.length, tags);
+        return groupId;
     }
 }
 

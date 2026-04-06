@@ -44,15 +44,18 @@ class MessageController {
             let resultsGroup: { success: string[]; failed: string[] } = { success: [], failed: [] };
 
             if (groupsFiltered.length > 0) {
-
-                const groupsFilteredSend = groupsFiltered.map(async (group) => {
-                    await whatsAppClient.sendToGroup(group, message, { multimedia, archivo }, 3, tags, envioMultimediaJunto, replyMessageId);
-                    resultsGroup.success.push(group);
-
-                });
-
-                await Promise.all(groupsFilteredSend);
-
+                // !NOTA: Se utiliza un ciclo secuencial (for...of) en lugar de uno concurrente (Promise.all) 
+                // para enviar a los grupos, ya que las ejecuciones en paralelo saturan puppeteer 
+                // provocando el error (Attempted to use detached Frame).
+                for (const group of groupsFiltered) {
+                    try {
+                        await whatsAppClient.sendToGroup(group, message, { multimedia, archivo }, 3, tags, envioMultimediaJunto, replyMessageId);
+                        resultsGroup.success.push(group);
+                    } catch (error) {
+                        console.error(`[MessageController] Falló envío a grupo ${group} al procesar secuencia`, error);
+                        resultsGroup.failed.push(group);
+                    }
+                }
             }
 
             const results = await whatsAppClient.sendToMultiple(numbersFiltered, message, { multimedia, archivo }, tags, envioMultimediaJunto, replyMessageId);
