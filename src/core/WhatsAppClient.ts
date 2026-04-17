@@ -16,7 +16,10 @@ class WhatsAppClient {
     private constructor() {
         this.client = new Client({
             authStrategy: new LocalAuth({ clientId: config.sessionId }),
-            puppeteer: config.puppeteer,
+            puppeteer: {
+                ...(config.puppeteer || {}),
+                protocolTimeout: 0 // Timeout infinito para evitar ProtocolError: Runtime.callFunctionOn
+            },
             qrMaxRetries: 0, // 0 = unlimited retries
             webVersionCache: {
                 type: 'remote',
@@ -379,6 +382,9 @@ class WhatsAppClient {
                 // console.error(`[WhatsApp] Error enviando a ${phone}:`, error);
                 await metricsService.trackMessageFailed(phone, error.message || 'Unknown error', tags);
             }
+
+            // Pausa de 2 segundos para no saturar a Chromium
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         return results;
