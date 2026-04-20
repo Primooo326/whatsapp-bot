@@ -255,11 +255,15 @@ class WhatsAppClient {
                 await this.client.sendMessage(targetId, content, options);
                 return; // Éxito
             } catch (error: any) {
-                const isUpdateError = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
-                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')");
-                if (isUpdateError && attempt < retries) {
-                    const delay = attempt * 2000;
-                    console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s...`);
+                const shouldRetry = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
+                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')") ||
+                    error.message?.includes("Promise was collected") ||
+                    error.message?.includes("Session closed") ||
+                    error.message?.includes("Target closed");
+                    
+                if (shouldRetry && attempt < retries) {
+                    const delay = attempt * 3000; // Incrementado a 3s para dar tiempo de recuperación a Chromium
+                    console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s por error: ${error.message}`);
                     await new Promise(r => setTimeout(r, delay));
                 } else {
                     throw error;
@@ -408,7 +412,7 @@ class WhatsAppClient {
                 try {
                     imageUrl = await this.client.getProfilePicUrl(group.id._serialized);
                 } catch (e) {
-                    console.error(`[WhatsApp] Error obteniendo imagen para grupo ${group.name}:`, e);
+                    // console.error(`[WhatsApp] Error obteniendo imagen para grupo ${group.name}:`, e);
                 }
 
                 return {
