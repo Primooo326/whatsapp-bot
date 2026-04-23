@@ -9,3 +9,7 @@ README.md
 logs
 .wwebjs_auth
 .wwebjs_cache
+.env.example
+API_DOCS.md
+SOLUCION_PROBLEMAS.md
+scripts
