@@ -1,0 +1,17 @@
+services:
+  whatsapp-bot:
+    build:
+      context: .
+      dockerfile: dockerfile
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./logs:/app/logs
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      - ./.wwebjs_cache:/app/.wwebjs_cache
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Bogota
