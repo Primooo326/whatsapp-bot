@@ -1,4 +1,4 @@
-FROM node:24-alpine AS builder
+FROM node:24-slim AS builder
 WORKDIR /app
 
 COPY . .
@@ -6,18 +6,55 @@ COPY . .
 RUN npm install && npm run build
 
 
-FROM node:24-alpine AS runner
+FROM node:24-slim AS runner
 WORKDIR /app
 
-
-COPY install-deps.sh .
-RUN chmod +x install-deps.sh && ./install-deps.sh
+# Instalar dependencias de Chromium para Debian/slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gconf-service \
+    libgbm-dev \
+    libasound2t64 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgcc-s1 \
+    libgconf-2-4 \
+    libgdk-pixbuf-2.0-0 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    ca-certificates \
+    fonts-liberation \
+    libnss3 \
+    lsb-release \
+    xdg-utils \
+    wget \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
 
 RUN npm install --production
-
 
 # Comando de ejecución
 CMD ["node", "dist/index.js"]

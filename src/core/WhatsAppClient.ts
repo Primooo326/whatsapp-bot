@@ -6,12 +6,14 @@ import * as qrTerminal from 'qrcode-terminal';
 import { config } from '../config';
 import { metricsService } from '../services/metrics.service';
 import { FileUtils } from '../utils/FileUtils';
+import { MessageQueue } from './MessageQueue';
 
 class WhatsAppClient {
     private static instance: WhatsAppClient;
     private client: Client;
     private ready: boolean = false;
     private io: Server | null = null;
+    private messageQueue: MessageQueue = new MessageQueue(3000);
 
     private constructor() {
         this.client = new Client({
@@ -259,10 +261,13 @@ class WhatsAppClient {
                     error.message?.includes("Cannot read properties of undefined (reading 'getChat')") ||
                     error.message?.includes("Promise was collected") ||
                     error.message?.includes("Session closed") ||
-                    error.message?.includes("Target closed");
+                    error.message?.includes("Target closed") ||
+                    error.message?.includes("ProtocolError") ||
+                    error.message?.includes("timed out") ||
+                    error.message?.includes("Runtime.callFunctionOn");
                     
                 if (shouldRetry && attempt < retries) {
-                    const delay = attempt * 3000; // Incrementado a 3s para dar tiempo de recuperación a Chromium
+                    const delay = attempt * 5000; // 5s, 10s, 15s - tiempo de recuperación progresivo para Chromium
                     console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s por error: ${error.message}`);
                     await new Promise(r => setTimeout(r, delay));
                 } else {
@@ -309,7 +314,7 @@ class WhatsAppClient {
                             options.caption = message; // Attach message as caption
                         }
 
-                        await this.sendWithRetry(chatId, media, options, retries);
+                        await this.messageQueue.add(() => this.sendWithRetry(chatId, media, options, retries));
 
                         // Solo marcamos el mensaje como enviado si tuvimos éxito enviando la imagen
                         if (isFirst) {
@@ -333,7 +338,7 @@ class WhatsAppClient {
             let options: any = {};
             if (replyMessageId) options.quotedMessageId = replyMessageId;
             try {
-                await this.sendWithRetry(chatId, message, options, retries);
+                await this.messageQueue.add(() => this.sendWithRetry(chatId, message, options, retries));
             } catch (e: any) {
                 console.error(`[WhatsApp] Error enviando mensaje de texto a ${phoneNumber}:`, e);
             }
@@ -352,7 +357,7 @@ class WhatsAppClient {
                         let options: any = { sendMediaAsDocument: true };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
-                        await this.sendWithRetry(chatId, media, options, retries);
+                        await this.messageQueue.add(() => this.sendWithRetry(chatId, media, options, retries));
                         await metricsService.trackFileSent(phoneNumber, 'archivo', tags);
                     } catch (e: any) {
                         console.error(`[WhatsApp] Error enviando archivo ${url} a ${phoneNumber}:`, e);
@@ -387,8 +392,7 @@ class WhatsAppClient {
                 await metricsService.trackMessageFailed(phone, error.message || 'Unknown error', tags);
             }
 
-            // Pausa de 2 segundos para no saturar a Chromium
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // La cola ya maneja la pausa entre mensajes, no se necesita delay adicional aquí
         }
 
         return results;
@@ -527,7 +531,7 @@ class WhatsAppClient {
                             options.caption = message; // Attach message as caption to the first image
                         }
 
-                        await this.sendWithRetry(groupId, media, options, retries);
+                        await this.messageQueue.add(() => this.sendWithRetry(groupId, media, options, retries));
 
                         if (isFirst) {
                             messageSentWithMedia = true;
@@ -549,7 +553,7 @@ class WhatsAppClient {
             let options: any = {};
             if (replyMessageId) options.quotedMessageId = replyMessageId;
             try {
-                await this.sendWithRetry(groupId, message, options, retries);
+                await this.messageQueue.add(() => this.sendWithRetry(groupId, message, options, retries));
             } catch (e: any) {
                 console.error(`[WhatsApp] Error enviando mensaje de texto al grupo ${groupId}:`, e);
             }
@@ -568,7 +572,7 @@ class WhatsAppClient {
                         let options: any = { sendMediaAsDocument: true };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
-                        await this.sendWithRetry(groupId, media, options, retries);
+                        await this.messageQueue.add(() => this.sendWithRetry(groupId, media, options, retries));
                         await metricsService.trackFileSent(groupId, 'archivo', tags);
                     } catch (e: any) {
                         console.error(`[WhatsApp] Error enviando archivo al grupo ${groupId}:`, e);
