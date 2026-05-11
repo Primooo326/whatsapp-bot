@@ -497,6 +497,128 @@ class WhatsAppClient {
         }
     }
 
+    /**
+     * Reinicia el cliente de WhatsApp
+     */
+    public async restart(): Promise<void> {
+        console.log('[WhatsApp] Reiniciando cliente...');
+        this.ready = false;
+        if (this.io) {
+            this.io.emit('whatsapp_status', { state: 'RESTARTING' });
+        }
+        try {
+            await this.client.destroy();
+        } catch (e) {
+            console.warn('[WhatsApp] Error al destruir cliente (puede ser normal):', e);
+        }
+        // Recrear el cliente
+        this.client = new Client({
+            authStrategy: new LocalAuth({ clientId: config.sessionId }),
+            puppeteer: {
+                ...(config.puppeteer || {}),
+                protocolTimeout: 0
+            },
+            qrMaxRetries: 0,
+            webVersionCache: {
+                type: 'remote',
+                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
+            }
+        });
+        this.setupEventListeners();
+        await this.initialize();
+    }
+
+    /**
+     * Cierra sesión de WhatsApp (se requerirá nuevo QR)
+     */
+    public async logout(): Promise<void> {
+        console.log('[WhatsApp] Cerrando sesión de WhatsApp...');
+        this.ready = false;
+        if (this.io) {
+            this.io.emit('whatsapp_status', { state: 'LOGGING_OUT' });
+        }
+        try {
+            await this.client.logout();
+        } catch (e) {
+            console.warn('[WhatsApp] Error al cerrar sesión:', e);
+        }
+        try {
+            await this.client.destroy();
+        } catch (e) {
+            console.warn('[WhatsApp] Error al destruir cliente post-logout:', e);
+        }
+        // Recrear y reinicializar
+        this.client = new Client({
+            authStrategy: new LocalAuth({ clientId: config.sessionId }),
+            puppeteer: {
+                ...(config.puppeteer || {}),
+                protocolTimeout: 0
+            },
+            qrMaxRetries: 0,
+            webVersionCache: {
+                type: 'remote',
+                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
+            }
+        });
+        this.setupEventListeners();
+        await this.initialize();
+    }
+
+    /**
+     * Elimina caché y datos de sesión, luego reinicializa
+     */
+    public async clearCacheAndRestart(): Promise<void> {
+        console.log('[WhatsApp] Limpiando caché y reiniciando...');
+        this.ready = false;
+        if (this.io) {
+            this.io.emit('whatsapp_status', { state: 'CLEARING_CACHE' });
+        }
+        try {
+            await this.client.destroy();
+        } catch (e) {
+            console.warn('[WhatsApp] Error al destruir cliente:', e);
+        }
+
+        // Eliminar carpetas de caché
+        const cachePaths = ['.wwebjs_auth', '.wwebjs_cache'];
+        for (const cachePath of cachePaths) {
+            try {
+                if (fs.existsSync(cachePath)) {
+                    fs.rmSync(cachePath, { recursive: true, force: true });
+                    console.log(`[WhatsApp] Carpeta ${cachePath} eliminada`);
+                }
+            } catch (e) {
+                console.warn(`[WhatsApp] Error eliminando ${cachePath}:`, e);
+            }
+        }
+
+        // Recrear y reinicializar
+        this.client = new Client({
+            authStrategy: new LocalAuth({ clientId: config.sessionId }),
+            puppeteer: {
+                ...(config.puppeteer || {}),
+                protocolTimeout: 0
+            },
+            qrMaxRetries: 0,
+            webVersionCache: {
+                type: 'remote',
+                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
+            }
+        });
+        this.setupEventListeners();
+        await this.initialize();
+    }
+
+    /**
+     * Obtiene estado detallado del cliente
+     */
+    public getState(): { ready: boolean; sessionId: string } {
+        return {
+            ready: this.ready,
+            sessionId: config.sessionId
+        };
+    }
+
     public async sendToGroup(
         groupId: string,
         message: string,

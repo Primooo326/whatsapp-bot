@@ -1,5 +1,6 @@
 import { Metric, MetricEventType, IMetric } from '../database/models/Metric';
 import { config } from '../config';
+import mongoose from 'mongoose';
 
 class MetricsService {
     private static instance: MetricsService;
@@ -15,6 +16,8 @@ class MetricsService {
      * Registra un evento de métrica
      */
     async trackEvent(eventType: MetricEventType, data: IMetric['data'] = {}): Promise<void> {
+        if (mongoose.connection.readyState !== 1) return; // Skip if DB is not connected
+
         try {
             const metric = new Metric({
                 eventType,
@@ -25,8 +28,8 @@ class MetricsService {
                 }
             });
             await metric.save();
-        } catch (error) {
-            console.error('[Metrics] Error guardando métrica:', error);
+        } catch (error: any) {
+            console.error(`[Metrics] Error guardando métrica: ${error.message || 'Fallo desconocido'}`);
         }
     }
 
@@ -151,45 +154,40 @@ class MetricsService {
         filesSent: number;
         filesFailed: number;
     }> {
+        const defaultMetrics = {
+            messagesSent: 0, messagesFailed: 0, groupMessagesSent: 0, groupMessagesFailed: 0,
+            apiRequests: 0, apiErrors: 0, mediaSent: 0, mediaFailed: 0, filesSent: 0, filesFailed: 0
+        };
+
+        if (mongoose.connection.readyState !== 1) return defaultMetrics;
+
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
 
-        const [
-            messagesSent,
-            messagesFailed,
-            groupMessagesSent,
-            groupMessagesFailed,
-            apiRequests,
-            apiErrors,
-            mediaSent,
-            mediaFailed,
-            filesSent,
-            filesFailed
-        ] = await Promise.all([
-            Metric.countDocuments({ eventType: 'message_sent', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'message_failed', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'group_message_sent', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'group_message_failed', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'api_request', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'api_error', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'media_sent', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'media_failed', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'file_sent', timestamp: { $gte: startOfDay } }),
-            Metric.countDocuments({ eventType: 'file_failed', timestamp: { $gte: startOfDay } })
-        ]);
+        try {
+            const [
+                messagesSent, messagesFailed, groupMessagesSent, groupMessagesFailed,
+                apiRequests, apiErrors, mediaSent, mediaFailed, filesSent, filesFailed
+            ] = await Promise.all([
+                Metric.countDocuments({ eventType: 'message_sent', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'message_failed', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'group_message_sent', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'group_message_failed', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'api_request', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'api_error', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'media_sent', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'media_failed', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'file_sent', timestamp: { $gte: startOfDay } }),
+                Metric.countDocuments({ eventType: 'file_failed', timestamp: { $gte: startOfDay } })
+            ]);
 
-        return {
-            messagesSent,
-            messagesFailed,
-            groupMessagesSent,
-            groupMessagesFailed,
-            apiRequests,
-            apiErrors,
-            mediaSent,
-            mediaFailed,
-            filesSent,
-            filesFailed
-        };
+            return {
+                messagesSent, messagesFailed, groupMessagesSent, groupMessagesFailed,
+                apiRequests, apiErrors, mediaSent, mediaFailed, filesSent, filesFailed
+            };
+        } catch (error) {
+            return defaultMetrics;
+        }
     }
 
     /**
@@ -199,54 +197,66 @@ class MetricsService {
         total: number;
         byType: Record<string, number>;
     }> {
-        const metrics = await Metric.aggregate([
-            {
-                $match: {
-                    timestamp: { $gte: startDate, $lte: endDate }
+        if (mongoose.connection.readyState !== 1) return { total: 0, byType: {} };
+
+        try {
+            const metrics = await Metric.aggregate([
+                {
+                    $match: {
+                        timestamp: { $gte: startDate, $lte: endDate }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$eventType',
+                        count: { $sum: 1 }
+                    }
                 }
-            },
-            {
-                $group: {
-                    _id: '$eventType',
-                    count: { $sum: 1 }
-                }
-            }
-        ]);
+            ]);
 
-        const byType: Record<string, number> = {};
-        let total = 0;
+            const byType: Record<string, number> = {};
+            let total = 0;
 
-        metrics.forEach((m: { _id: string; count: number }) => {
-            byType[m._id] = m.count;
-            total += m.count;
-        });
+            metrics.forEach((m: { _id: string; count: number }) => {
+                byType[m._id] = m.count;
+                total += m.count;
+            });
 
-        return { total, byType };
+            return { total, byType };
+        } catch (error) {
+            return { total: 0, byType: {} };
+        }
     }
 
     /**
      * Obtiene el tiempo de respuesta promedio de la API
      */
     async getAverageResponseTime(hours: number = 24): Promise<number> {
+        if (mongoose.connection.readyState !== 1) return 0;
+
         const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-        const result = await Metric.aggregate([
-            {
-                $match: {
-                    eventType: 'api_request',
-                    timestamp: { $gte: since },
-                    'data.responseTimeMs': { $exists: true }
+        try {
+            const result = await Metric.aggregate([
+                {
+                    $match: {
+                        eventType: 'api_request',
+                        timestamp: { $gte: since },
+                        'data.responseTimeMs': { $exists: true }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        avgResponseTime: { $avg: '$data.responseTimeMs' }
+                    }
                 }
-            },
-            {
-                $group: {
-                    _id: null,
-                    avgResponseTime: { $avg: '$data.responseTimeMs' }
-                }
-            }
-        ]);
+            ]);
 
-        return result[0]?.avgResponseTime || 0;
+            return result[0]?.avgResponseTime || 0;
+        } catch (error) {
+            return 0;
+        }
     }
 
     /**
@@ -261,70 +271,76 @@ class MetricsService {
         groupMessagesFailed: number;
         totalMessages: number;
     }[]> {
-        const result = await Metric.aggregate([
-            {
-                $match: {
-                    timestamp: { $gte: startDate, $lte: endDate },
-                    eventType: { $in: ['message_sent', 'message_failed', 'group_message_sent', 'group_message_failed'] }
-                }
-            },
-            {
-                $group: {
-                    _id: {
-                        date: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
-                        eventType: '$eventType'
-                    },
-                    count: { $sum: 1 }
-                }
-            },
-            {
-                $group: {
-                    _id: '$_id.date',
-                    events: {
-                        $push: {
-                            type: '$_id.eventType',
-                            count: '$count'
+        if (mongoose.connection.readyState !== 1) return [];
+
+        try {
+            const result = await Metric.aggregate([
+                {
+                    $match: {
+                        timestamp: { $gte: startDate, $lte: endDate },
+                        eventType: { $in: ['message_sent', 'message_failed', 'group_message_sent', 'group_message_failed'] }
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            date: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
+                            eventType: '$eventType'
+                        },
+                        count: { $sum: 1 }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$_id.date',
+                        events: {
+                            $push: {
+                                type: '$_id.eventType',
+                                count: '$count'
+                            }
                         }
                     }
+                },
+                {
+                    $sort: { _id: 1 }
                 }
-            },
-            {
-                $sort: { _id: 1 }
-            }
-        ]);
+            ]);
 
-        return result.map((day: any) => {
-            const stats = {
-                date: day._id,
-                messagesSent: 0,
-                messagesFailed: 0,
-                groupMessagesSent: 0,
-                groupMessagesFailed: 0,
-                totalMessages: 0
-            };
+            return result.map((day: any) => {
+                const stats = {
+                    date: day._id,
+                    messagesSent: 0,
+                    messagesFailed: 0,
+                    groupMessagesSent: 0,
+                    groupMessagesFailed: 0,
+                    totalMessages: 0
+                };
 
-            day.events.forEach((e: { type: string; count: number }) => {
-                switch (e.type) {
-                    case 'message_sent':
-                        stats.messagesSent = e.count;
-                        break;
-                    case 'message_failed':
-                        stats.messagesFailed = e.count;
-                        break;
-                    case 'group_message_sent':
-                        stats.groupMessagesSent = e.count;
-                        break;
-                    case 'group_message_failed':
-                        stats.groupMessagesFailed = e.count;
-                        break;
-                }
+                day.events.forEach((e: { type: string; count: number }) => {
+                    switch (e.type) {
+                        case 'message_sent':
+                            stats.messagesSent = e.count;
+                            break;
+                        case 'message_failed':
+                            stats.messagesFailed = e.count;
+                            break;
+                        case 'group_message_sent':
+                            stats.groupMessagesSent = e.count;
+                            break;
+                        case 'group_message_failed':
+                            stats.groupMessagesFailed = e.count;
+                            break;
+                    }
+                });
+
+                stats.totalMessages = stats.messagesSent + stats.messagesFailed +
+                    stats.groupMessagesSent + stats.groupMessagesFailed;
+
+                return stats;
             });
-
-            stats.totalMessages = stats.messagesSent + stats.messagesFailed +
-                stats.groupMessagesSent + stats.groupMessagesFailed;
-
-            return stats;
-        });
+        } catch (error) {
+            return [];
+        }
     }
 
     /**
@@ -392,70 +408,82 @@ class MetricsService {
      * Obtiene los destinatarios con más mensajes (enviados o fallidos)
      */
     async getTopRecipients(limit: number = 10, type: 'sent' | 'failed' = 'sent'): Promise<{ recipient: string; count: number }[]> {
+        if (mongoose.connection.readyState !== 1) return [];
+
         const eventType = type === 'sent' ? 'message_sent' : 'message_failed';
 
-        const result = await Metric.aggregate([
-            {
-                $match: { eventType }
-            },
-            {
-                $group: {
-                    _id: '$data.recipient',
-                    count: { $sum: 1 }
+        try {
+            const result = await Metric.aggregate([
+                {
+                    $match: { eventType }
+                },
+                {
+                    $group: {
+                        _id: '$data.recipient',
+                        count: { $sum: 1 }
+                    }
+                },
+                {
+                    $sort: { count: -1 }
+                },
+                {
+                    $limit: limit
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        recipient: '$_id',
+                        count: 1
+                    }
                 }
-            },
-            {
-                $sort: { count: -1 }
-            },
-            {
-                $limit: limit
-            },
-            {
-                $project: {
-                    _id: 0,
-                    recipient: '$_id',
-                    count: 1
-                }
-            }
-        ]);
+            ]);
 
-        return result;
+            return result;
+        } catch (error) {
+            return [];
+        }
     }
 
     /**
      * Obtiene los grupos con más mensajes (enviados o fallidos)
      */
     async getTopGroups(limit: number = 10, type: 'sent' | 'failed' = 'sent'): Promise<{ groupId: string; groupName?: string; count: number }[]> {
+        if (mongoose.connection.readyState !== 1) return [];
+
         const eventType = type === 'sent' ? 'group_message_sent' : 'group_message_failed';
 
-        const result = await Metric.aggregate([
-            {
-                $match: { eventType }
-            },
-            {
-                $group: {
-                    _id: '$data.groupId',
-                    groupName: { $first: '$data.groupName' },
-                    count: { $sum: 1 }
+        try {
+            const result = await Metric.aggregate([
+                {
+                    $match: { eventType }
+                },
+                {
+                    $group: {
+                        _id: '$data.groupId',
+                        groupName: { $first: '$data.groupName' },
+                        count: { $sum: 1 }
+                    }
+                },
+                {
+                    $sort: { count: -1 }
+                },
+                {
+                    $limit: limit
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        groupId: '$_id',
+                        groupName: 1,
+                        count: 1
+                    }
                 }
-            },
-            {
-                $sort: { count: -1 }
-            },
-            {
-                $limit: limit
-            },
-            {
-                $project: {
-                    _id: 0,
-                    groupId: '$_id',
-                    groupName: 1,
-                    count: 1
-                }
-            }
-        ]);
+            ]);
 
-        return result;
+            return result;
+        } catch (error) {
+            return [];
+        }
     }
 }
 

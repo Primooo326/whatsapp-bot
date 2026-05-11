@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+set -e
+
+# Actualizar repositorios e instalar dependencias de Chromium para Debian/slim
 apt-get update
 apt-get install -y --no-install-recommends \
     gconf-service \
@@ -11,9 +14,9 @@ apt-get install -y --no-install-recommends \
     libdbus-1-3 \
     libexpat1 \
     libfontconfig1 \
-    libgcc1 \
+    libgcc-s1 \
     libgconf-2-4 \
-    libgdk-pixbuf-xlib-2.0-0 \
+    libgdk-pixbuf-2.0-0 \
     libglib2.0-0 \
     libgtk-3-0 \
     libnspr4 \
@@ -35,11 +38,12 @@ apt-get install -y --no-install-recommends \
     libxtst6 \
     ca-certificates \
     fonts-liberation \
-    libappindicator1 \
     libnss3 \
     lsb-release \
     xdg-utils \
     wget \
+    nginx
 
+# Limpiar cache para reducir tamaño de imagen
 apt-get clean
 rm -rf /var/lib/apt/lists/*

@@ -2,6 +2,11 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { logCapture } from './core/LogCapture';
+
+// Iniciar captura de logs ANTES de cualquier otro módulo
+logCapture.startCapture();
+
 import { config } from './config';
 import { connectDatabase } from './database/connection';
 import { whatsAppClient } from './core/WhatsAppClient';
@@ -18,8 +23,9 @@ const io = new Server(server, {
     }
 });
 
-// Pass socket instance to WhatsAppClient
+// Pass socket instance to WhatsAppClient and LogCapture
 whatsAppClient.setSocket(io);
+logCapture.setSocket(io);
 
 // Middlewares
 app.use(cors());

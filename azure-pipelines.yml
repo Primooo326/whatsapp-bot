@@ -1,7 +1,3 @@
-# Docker
-# Build a Docker image
-# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
-
 trigger:
 - main
 
@@ -10,20 +6,90 @@ resources:
 
 variables:
   tag: '$(Build.BuildId)'
+  dockerRegistryServiceConnection: "oberon360Registry"
+  containerRegistry: "oberonregistry.azurecr.io"
+  envFileName: ".env.wha-bot"
+  imageRepository: "wha-bot"
+  sshConnection: "oberon360backvm"
 
 stages:
-- stage: Build
-  displayName: Build image
-  jobs:
-  - job: Build
-    displayName: Build
-    pool:
-      vmImage: ubuntu-latest
-    steps:
-    - task: Docker@2
-      displayName: Build an image
-      inputs:
-        command: build
-        dockerfile: '$(Build.SourcesDirectory)/dockerfile'
-        tags: |
-          $(tag)
+  # ==========================================
+  # STAGE 1: CONSTRUCCIÓN Y SUBIDA
+  # ==========================================
+  - stage: BuildAndPush
+    displayName: "📦 Build & Push"
+    jobs:
+      - job: Build
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - script: |
+              curl -s -X POST "$(WHA_URL)" \
+                -H "Content-Type: application/json" \
+                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"🚀 *[Wha-Bot]* Iniciando Build\n📌 Rama: *$(Build.SourceBranch)*\n🏷️ Entorno: *$(branchLabel)*\"}" || true
+            displayName: "🔔 WhatsApp - Inicio"
+
+          - task: DownloadSecureFile@1
+            name: envFile
+            inputs:
+              secureFile: $(envFileName)
+
+          - script: |
+              cp $(envFile.secureFilePath) .env
+              [ -f "docker/.dockerignore" ] && cp docker/.dockerignore .
+            displayName: "Preparar Contexto"
+
+          - task: Docker@2
+            displayName: "Build and Push to ACR"
+            inputs:
+              containerRegistry: $(dockerRegistryServiceConnection)
+              repository: $(imageRepository)
+              command: "buildAndPush"
+              dockerfile: $(dockerfilePath)
+              buildContext: "."
+              tags: |
+                $(tag)
+                $(Build.BuildId)
+  # ==========================================
+  # STAGE 2: DESPLIEGUE EN DOCKER SWARM
+  # ==========================================
+  - stage: Deploy
+    displayName: "🚀 Deploy to Swarm"
+    dependsOn: BuildAndPush
+    condition: succeeded()
+    jobs:
+      - job: SwarmDeploy
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: SSH@0
+            displayName: "Ejecutar Update en VM"
+            inputs:
+              sshEndpoint: $(sshConnection)
+              runOptions: "inline"
+              inline: |
+                set -e
+                echo "🔄 Actualizando servicio wha-bot_wha-bot..."
+                sudo docker service update \
+                  --image $(containerRegistry)/$(imageRepository):$(Build.BuildId) \
+                  --with-registry-auth \
+                  wha-bot_wha-bot
+
+                echo "📊 Estado de las réplicas:"
+                sudo docker service ps wha-bot_wha-bot --no-trunc | head -n 5
+
+          # NOTIFICACIÓN DE ÉXITO FINAL
+          - script: |
+              curl -s -X POST "$(WHA_URL)" \
+                -H "Content-Type: application/json" \
+                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"✅ *[Wha-Bot]* Despliegue EXITOSO\n🌐 Entorno: *$(branchLabel)*\n📦 Imagen: *$(imageRepository)*\n🔢 Build ID: *$(Build.BuildId)*\"}" || true
+            displayName: "🔔 WhatsApp - Éxito"
+            condition: succeeded()
+
+          # NOTIFICACIÓN DE ERROR FINAL
+          - script: |
+              curl -s -X POST "$(WHA_URL)" \
+                -H "Content-Type: application/json" \
+                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"❌ *[Wha-Bot]* FALLO EN DESPLIEGUE\n📌 Rama: *$(Build.SourceBranch)*\n⚠️ Revisa los logs de la tarea SSH en Azure DevOps.\"}" || true
+            displayName: "🔔 WhatsApp - Fallo"
+            condition: failed()
