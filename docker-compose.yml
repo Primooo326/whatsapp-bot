@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: dockerfile
     ports:
-      - "80:80"
+      - "8080:8080"
       - "3100:3100"
     volumes:
       - ./logs:/app/logs
