@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { messageController } from '../controllers/message.controller';
 import { metricsController } from '../controllers/metrics.controller';
+import { sessionController } from '../controllers/session.controller';
 import { whatsAppClient } from '../core/WhatsAppClient';
 import { HealthResponse } from '../types';
 
@@ -34,5 +35,14 @@ router.post('/groups/send', (req, res, next) => messageController.sendToGroup(re
 router.get('/metrics', (req, res, next) => metricsController.getMetrics(req, res, next));
 router.get('/metrics/range', (req, res, next) => metricsController.getMetricsByRange(req, res, next));
 router.get('/metrics/monthly', (req, res, next) => metricsController.getMonthlyReport(req, res, next));
+
+// Session management endpoints
+router.get('/session/status', (req, res, next) => sessionController.getStatus(req, res, next));
+router.post('/session/restart', (req, res, next) => sessionController.restart(req, res, next));
+router.post('/session/logout', (req, res, next) => sessionController.logout(req, res, next));
+router.post('/session/clear', (req, res, next) => sessionController.clearCache(req, res, next));
+
+// Logs endpoint
+router.get('/logs', (req, res, next) => sessionController.getLogs(req, res, next));
 
 export default router;

@@ -4,3 +4,27 @@
 node_modules
 dist
 .env
+
+# Agregar esto al .gitignore de la raíz:
+# Ignore Terraform directories and files
+.terraform/
+**/terraform/.terraform/
+**/.terraform/
+
+# Ignore state files (very important)
+*.tfstate
+*.tfstate.*
+
+# Ignore lock files
+*.tfstate.lock.*
+
+# Ignore crash logs
+crash.log
+tfplan
+tfplan.*
+
+# Ignore provider cache
+.terraform.lock.hcl
+
+# Ignore Terraform cache
+**/terraform/.terraform
