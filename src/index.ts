@@ -36,7 +36,7 @@ app.use('/public', express.static('public'));
 // Health check endpoint
 app.get('/api/health', (_req, res) => {
     res.status(200).json({
-        status: 'ok',
+        status: 'oka',
         timestamp: new Date().toISOString()
     });
 });
