@@ -610,6 +610,20 @@ class WhatsAppClient {
     }
 
     /**
+     * Destruye el cliente de WhatsApp y libera los recursos de Chromium
+     */
+    public async destroy(): Promise<void> {
+        console.log('[WhatsApp] Destruyendo cliente...');
+        this.ready = false;
+        try {
+            await this.client.destroy();
+            console.log('[WhatsApp] Cliente destruido correctamente');
+        } catch (e) {
+            console.warn('[WhatsApp] Error al destruir cliente:', e);
+        }
+    }
+
+    /**
      * Obtiene estado detallado del cliente
      */
     public getState(): { ready: boolean; sessionId: string } {
