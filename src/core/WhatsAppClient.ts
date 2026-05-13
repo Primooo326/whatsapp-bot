@@ -3,6 +3,8 @@ import { Server } from 'socket.io';
 import * as fs from 'fs';
 import * as qrTerminal from 'qrcode-terminal';
 
+import * as path from 'path';
+
 import { config } from '../config';
 import { metricsService } from '../services/metrics.service';
 import { FileUtils } from '../utils/FileUtils';
@@ -14,10 +16,19 @@ class WhatsAppClient {
     private ready: boolean = false;
     private io: Server | null = null;
     private messageQueue: MessageQueue = new MessageQueue(3000);
+    
+    // Rutas para la estrategia de copiado local (Evita bloqueos de Azure Files)
+    private sharedDataPath = path.join(process.cwd(), '.wwebjs_auth');
+    private localDataPath = '/tmp/.wwebjs_auth';
 
     private constructor() {
+        this.syncSessionToLocal();
+
         this.client = new Client({
-            authStrategy: new LocalAuth({ clientId: config.sessionId }),
+            authStrategy: new LocalAuth({ 
+                clientId: config.sessionId,
+                dataPath: this.localDataPath // IMPORTANTE: Ejecutar en /tmp local
+            }),
             puppeteer: {
                 ...(config.puppeteer || {}),
                 protocolTimeout: 0 // Timeout infinito para evitar ProtocolError: Runtime.callFunctionOn
@@ -30,6 +41,31 @@ class WhatsAppClient {
         });
 
         this.setupEventListeners();
+    }
+
+    private syncSessionToLocal(): void {
+        if (fs.existsSync(this.sharedDataPath)) {
+            console.log('[WhatsApp] Copiando sesión de Azure Files a local (/tmp) para evitar bloqueos...');
+            try {
+                fs.cpSync(this.sharedDataPath, this.localDataPath, { recursive: true, force: true });
+                console.log('[WhatsApp] Sesión copiada a local con éxito.');
+            } catch (error) {
+                console.error('[WhatsApp] Error copiando sesión a local:', error);
+            }
+        }
+    }
+
+    private syncSessionToShared(): void {
+        if (fs.existsSync(this.localDataPath)) {
+            console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files...');
+            try {
+                // Sincronizar de vuelta para persistencia
+                fs.cpSync(this.localDataPath, this.sharedDataPath, { recursive: true, force: true });
+                console.log('[WhatsApp] Sincronización hacia la red completada.');
+            } catch (error) {
+                console.error('[WhatsApp] Error sincronizando sesión a la red:', error);
+            }
+        }
     }
 
     public static getInstance(): WhatsAppClient {
@@ -63,6 +99,7 @@ class WhatsAppClient {
 
         this.client.on('authenticated', () => {
             console.log('[WhatsApp] Autenticado con éxito');
+            this.syncSessionToShared(); // Sincronizar nueva sesión
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'AUTHENTICATED' });
             }
@@ -78,6 +115,7 @@ class WhatsAppClient {
         this.client.on('ready', async () => {
             console.log('[WhatsApp] Cliente listo (evento ready)');
             this.ready = true;
+            this.syncSessionToShared(); // Asegurar sincronización del estado final
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'CONNECTED' });
             }
@@ -95,6 +133,7 @@ class WhatsAppClient {
         this.client.on('disconnected', async (reason) => {
             console.log('[WhatsApp] Desconectado:', reason);
             this.ready = false;
+            this.syncSessionToShared(); // Sincronizar la desconexión
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'DISCONNECTED', reason });
             }
@@ -618,8 +657,10 @@ class WhatsAppClient {
         try {
             await this.client.destroy();
             console.log('[WhatsApp] Cliente destruido correctamente');
+            this.syncSessionToShared(); // Sincronizar estado final
         } catch (e) {
             console.warn('[WhatsApp] Error al destruir cliente:', e);
+            this.syncSessionToShared(); // Intentar sincronizar incluso si hubo error
         }
     }
 

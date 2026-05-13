@@ -107,39 +107,8 @@ const startServer = async () => {
                         retryCount++;
                         console.log(`[WhatsApp] El directorio está bloqueado. Reintento ${retryCount}/6 en 10s...`);
                         
-                        // Si llevamos más de 60 segundos (6 reintentos), es probable que el contenedor
-                        // anterior haya muerto sin limpiar el SingletonLock. Lo forzamos.
                         if (retryCount >= 6) {
-                            console.warn('[WhatsApp] Bloqueo persistente detectado. Intentando limpiar lock huérfano...');
-                            try {
-                                const fs = await import('fs');
-                                const path = await import('path');
-                                const sessionDir = path.join(process.cwd(), '.wwebjs_auth', `session-${config.sessionId}`);
-                                
-                                const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
-                                let deletedAny = false;
-
-                                for (const file of lockFiles) {
-                                    const lockPath = path.join(sessionDir, file);
-                                    try {
-                                        // No usamos existsSync porque devuelve false en symlinks rotos (que es lo que hace Chromium en Linux)
-                                        fs.unlinkSync(lockPath);
-                                        deletedAny = true;
-                                    } catch (e: any) {
-                                        if (e.code !== 'ENOENT') {
-                                            console.warn(`[WhatsApp] Error eliminando ${file}:`, e.message);
-                                        }
-                                    }
-                                }
-
-                                if (deletedAny) {
-                                    console.log('[WhatsApp] Archivos de bloqueo eliminados con éxito. Reintentando de inmediato.');
-                                } else {
-                                    console.log('[WhatsApp] No se encontraron archivos de bloqueo, pero falló. Reintentando de todos modos.');
-                                }
-                            } catch (fsError) {
-                                console.error('[WhatsApp] Error general limpiando locks:', fsError);
-                            }
+                            console.warn('[WhatsApp] Demasiados reintentos por bloqueo. Reiniciando contador...');
                             retryCount = 0; // Reiniciar contador
                         }
                     } else {
