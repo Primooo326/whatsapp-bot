@@ -87,9 +87,11 @@ const startServer = async () => {
             console.log(`  - GET  /api/wha/metrics/range`);
         });
 
-        // Función para inicializar WhatsApp con reintentos (maneja el lock de Chromium en despliegues)
+        // Función para inicializar WhatsApp con reintentos y recuperación de lock huérfano
         const initializeWhatsAppWithRetry = async () => {
             let initialized = false;
+            let retryCount = 0;
+            
             while (!initialized) {
                 try {
                     await whatsAppClient.initialize();
@@ -98,11 +100,37 @@ const startServer = async () => {
                 } catch (waError: any) {
                     const msg = waError?.message || String(waError);
                     console.error(`[WhatsApp] Error al inicializar: ${msg}`);
-                    if (msg.includes('browser is already running') || msg.includes('lock')) {
-                        console.log('[WhatsApp] El directorio de sesión está bloqueado por otra réplica. Reintentando en 10s...');
+                    
+                    const isLockError = msg.includes('browser is already running') || msg.includes('lock');
+                    
+                    if (isLockError) {
+                        retryCount++;
+                        console.log(`[WhatsApp] El directorio está bloqueado. Reintento ${retryCount}/6 en 10s...`);
+                        
+                        // Si llevamos más de 60 segundos (6 reintentos), es probable que el contenedor
+                        // anterior haya muerto sin limpiar el SingletonLock. Lo forzamos.
+                        if (retryCount >= 6) {
+                            console.warn('[WhatsApp] Bloqueo persistente detectado. Intentando limpiar lock huérfano...');
+                            try {
+                                const fs = await import('fs');
+                                const path = await import('path');
+                                const lockPath = path.join(process.cwd(), '.wwebjs_auth', `session-${config.sessionId}`, 'SingletonLock');
+                                
+                                if (fs.existsSync(lockPath)) {
+                                    fs.unlinkSync(lockPath);
+                                    console.log('[WhatsApp] SingletonLock eliminado con éxito. Reintentando de inmediato.');
+                                } else {
+                                    console.log('[WhatsApp] No se encontró archivo SingletonLock, pero falló por bloqueo.');
+                                }
+                            } catch (fsError) {
+                                console.error('[WhatsApp] Error al intentar eliminar SingletonLock:', fsError);
+                            }
+                            retryCount = 0; // Reiniciar contador
+                        }
                     } else {
                         console.log('[WhatsApp] Reintentando inicialización en 10s...');
                     }
+                    
                     // Esperar 10 segundos antes de reintentar
                     await new Promise(resolve => setTimeout(resolve, 10000));
                 }
