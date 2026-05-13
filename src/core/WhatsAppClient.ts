@@ -44,14 +44,29 @@ class WhatsAppClient {
     }
 
     private syncSessionToLocal(): void {
+        console.log('[WhatsApp] Preparando almacenamiento temporal local...');
+        if (fs.existsSync(this.localDataPath)) {
+            fs.rmSync(this.localDataPath, { recursive: true, force: true });
+        }
+
         if (fs.existsSync(this.sharedDataPath)) {
             console.log('[WhatsApp] Copiando sesión de Azure Files a local (/tmp) para evitar bloqueos...');
             try {
-                fs.cpSync(this.sharedDataPath, this.localDataPath, { recursive: true, force: true });
+                // Al copiar a local, ignoramos los candados viejos que pudieran haber quedado en Azure Files
+                fs.cpSync(this.sharedDataPath, this.localDataPath, { 
+                    recursive: true, 
+                    force: true,
+                    filter: (source: string) => {
+                        const name = path.basename(source);
+                        return !name.startsWith('Singleton');
+                    }
+                });
                 console.log('[WhatsApp] Sesión copiada a local con éxito.');
             } catch (error) {
                 console.error('[WhatsApp] Error copiando sesión a local:', error);
             }
+        } else {
+            console.log('[WhatsApp] No se encontró sesión en Azure Files, se creará una nueva.');
         }
     }
 
@@ -59,8 +74,15 @@ class WhatsAppClient {
         if (fs.existsSync(this.localDataPath)) {
             console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files...');
             try {
-                // Sincronizar de vuelta para persistencia
-                fs.cpSync(this.localDataPath, this.sharedDataPath, { recursive: true, force: true });
+                // Sincronizar de vuelta para persistencia, filtrando los candados de Chromium
+                fs.cpSync(this.localDataPath, this.sharedDataPath, { 
+                    recursive: true, 
+                    force: true,
+                    filter: (source: string) => {
+                        const name = path.basename(source);
+                        return !name.startsWith('Singleton');
+                    }
+                });
                 console.log('[WhatsApp] Sincronización hacia la red completada.');
             } catch (error: any) {
                 if (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'EBUSY') {
