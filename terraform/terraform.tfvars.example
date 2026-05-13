@@ -1,0 +1,25 @@
+# --- General ---
+location            = "eastus2"
+resource_group_name = "DESARROLLO"
+
+# --- Container App ---
+container_name = "auth-360"
+image_name     = "auth_360:latest"
+
+cpu_cores      = 0.5
+memory         = "1Gi"
+min_replicas   = 0
+max_replicas   = 2
+
+is_public                  = true
+target_port                = 3000
+allow_insecure_connections = false
+revision_mode              = "Multiple"
+
+# --- Monitoring ---
+appinsights_name = "auth-360-appinsights"
+
+# --- Core references ---
+container_app_environment_name = "core-360-env"
+managed_identity_name          = "core-identity"
+log_analytics_workspace_name   = "core-law"

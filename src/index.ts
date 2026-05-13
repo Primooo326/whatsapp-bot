@@ -33,6 +33,14 @@ app.use(express.json());
 app.use(metricsMiddleware);
 app.use('/public', express.static('public'));
 
+// Health check endpoint
+app.get('/api/health', (_req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Routes
 app.use('/api/wha', messageRoutes);
 
@@ -48,6 +56,7 @@ const startServer = async () => {
         server.listen(config.port, () => {
             console.log(`[Server] Running on port ${config.port}`);
             console.log(`[Server] Endpoints:`);
+            console.log(`  - GET  /api/health`);
             console.log(`  - GET  /api/wha/health`);
             console.log(`  - POST /api/wha/send`);
             console.log(`  - GET  /api/wha/groups`);
