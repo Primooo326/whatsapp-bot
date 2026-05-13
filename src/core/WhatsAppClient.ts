@@ -62,8 +62,12 @@ class WhatsAppClient {
                 // Sincronizar de vuelta para persistencia
                 fs.cpSync(this.localDataPath, this.sharedDataPath, { recursive: true, force: true });
                 console.log('[WhatsApp] Sincronización hacia la red completada.');
-            } catch (error) {
-                console.error('[WhatsApp] Error sincronizando sesión a la red:', error);
+            } catch (error: any) {
+                if (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'EBUSY') {
+                    console.warn('[WhatsApp] Sincronización pospuesta: Azure Files está bloqueado temporalmente (posiblemente la réplica vieja sigue viva).');
+                } else {
+                    console.error('[WhatsApp] Error sincronizando sesión a la red:', error.message);
+                }
             }
         }
     }
@@ -71,6 +75,14 @@ class WhatsAppClient {
     public static getInstance(): WhatsAppClient {
         if (!WhatsAppClient.instance) {
             WhatsAppClient.instance = new WhatsAppClient();
+            
+            // Sincronización periódica en segundo plano (cada 5 minutos)
+            // Esto asegura que la sesión se guarde incluso si el primer intento en 'ready' falló por candados
+            setInterval(() => {
+                if (WhatsAppClient.instance.ready) {
+                    WhatsAppClient.instance.syncSessionToShared();
+                }
+            }, 5 * 60 * 1000);
         }
         return WhatsAppClient.instance;
     }
