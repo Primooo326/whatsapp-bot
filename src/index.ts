@@ -114,16 +114,31 @@ const startServer = async () => {
                             try {
                                 const fs = await import('fs');
                                 const path = await import('path');
-                                const lockPath = path.join(process.cwd(), '.wwebjs_auth', `session-${config.sessionId}`, 'SingletonLock');
+                                const sessionDir = path.join(process.cwd(), '.wwebjs_auth', `session-${config.sessionId}`);
                                 
-                                if (fs.existsSync(lockPath)) {
-                                    fs.unlinkSync(lockPath);
-                                    console.log('[WhatsApp] SingletonLock eliminado con éxito. Reintentando de inmediato.');
+                                const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+                                let deletedAny = false;
+
+                                for (const file of lockFiles) {
+                                    const lockPath = path.join(sessionDir, file);
+                                    try {
+                                        // No usamos existsSync porque devuelve false en symlinks rotos (que es lo que hace Chromium en Linux)
+                                        fs.unlinkSync(lockPath);
+                                        deletedAny = true;
+                                    } catch (e: any) {
+                                        if (e.code !== 'ENOENT') {
+                                            console.warn(`[WhatsApp] Error eliminando ${file}:`, e.message);
+                                        }
+                                    }
+                                }
+
+                                if (deletedAny) {
+                                    console.log('[WhatsApp] Archivos de bloqueo eliminados con éxito. Reintentando de inmediato.');
                                 } else {
-                                    console.log('[WhatsApp] No se encontró archivo SingletonLock, pero falló por bloqueo.');
+                                    console.log('[WhatsApp] No se encontraron archivos de bloqueo, pero falló. Reintentando de todos modos.');
                                 }
                             } catch (fsError) {
-                                console.error('[WhatsApp] Error al intentar eliminar SingletonLock:', fsError);
+                                console.error('[WhatsApp] Error general limpiando locks:', fsError);
                             }
                             retryCount = 0; // Reiniciar contador
                         }
