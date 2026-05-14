@@ -16,7 +16,7 @@ class WhatsAppClient {
     private ready: boolean = false;
     private io: Server | null = null;
     private messageQueue: MessageQueue = new MessageQueue(3000);
-    
+
     // Rutas para la estrategia de copiado local (Evita bloqueos de Azure Files)
     private sharedDataPath = path.join(process.cwd(), '.wwebjs_auth');
     private localDataPath = '/tmp/.wwebjs_auth';
@@ -25,7 +25,7 @@ class WhatsAppClient {
         this.syncSessionToLocal();
 
         this.client = new Client({
-            authStrategy: new LocalAuth({ 
+            authStrategy: new LocalAuth({
                 clientId: config.sessionId,
                 dataPath: this.localDataPath // IMPORTANTE: Ejecutar en /tmp local
             }),
@@ -53,8 +53,8 @@ class WhatsAppClient {
             console.log('[WhatsApp] Copiando sesión de Azure Files a local (/tmp) para evitar bloqueos...');
             try {
                 // Al copiar a local, ignoramos los candados viejos que pudieran haber quedado en Azure Files
-                fs.cpSync(this.sharedDataPath, this.localDataPath, { 
-                    recursive: true, 
+                fs.cpSync(this.sharedDataPath, this.localDataPath, {
+                    recursive: true,
                     force: true,
                     filter: (source: string) => {
                         const name = path.basename(source);
@@ -75,8 +75,8 @@ class WhatsAppClient {
             console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files...');
             try {
                 // Sincronizar de vuelta para persistencia, filtrando los candados de Chromium
-                fs.cpSync(this.localDataPath, this.sharedDataPath, { 
-                    recursive: true, 
+                fs.cpSync(this.localDataPath, this.sharedDataPath, {
+                    recursive: true,
                     force: true,
                     filter: (source: string) => {
                         const name = path.basename(source);
@@ -97,7 +97,7 @@ class WhatsAppClient {
     public static getInstance(): WhatsAppClient {
         if (!WhatsAppClient.instance) {
             WhatsAppClient.instance = new WhatsAppClient();
-            
+
             // Sincronización periódica en segundo plano (cada 5 minutos)
             // Esto asegura que la sesión se guarde incluso si el primer intento en 'ready' falló por candados
             setInterval(() => {
@@ -338,7 +338,7 @@ class WhatsAppClient {
                     error.message?.includes("ProtocolError") ||
                     error.message?.includes("timed out") ||
                     error.message?.includes("Runtime.callFunctionOn");
-                    
+
                 if (shouldRetry && attempt < retries) {
                     const delay = attempt * 5000; // 5s, 10s, 15s - tiempo de recuperación progresivo para Chromium
                     console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s por error: ${error.message}`);
@@ -350,13 +350,22 @@ class WhatsAppClient {
         }
     }
 
+    private buildMediaFromFile(file: { path: string; filename: string; mimetype: string }): MessageMedia {
+        const b64data = fs.readFileSync(file.path, { encoding: 'base64' });
+        let mimeType = file.mimetype;
+        if (!mimeType || mimeType === 'application/octet-stream') {
+            mimeType = MessageMedia.fromFilePath(file.path).mimetype;
+        }
+        return new MessageMedia(mimeType, b64data, file.filename);
+    }
+
     public async sendMessage(
         phoneNumber: string,
         message: string,
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false,
+        envioMultimediaJunto: boolean = true,
         replyMessageId?: string
     ): Promise<void> {
         if (!this.ready) {
@@ -378,13 +387,13 @@ class WhatsAppClient {
                             throw new Error('El archivo excede el límite de 50MB');
                         }
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { caption: '' };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
                         const isFirst = (envioMultimediaJunto && i === 0 && message);
                         if (isFirst) {
-                            options.caption = message; // Attach message as caption
+                            options.caption = message;
                         }
 
                         await this.messageQueue.add(() => this.sendWithRetry(chatId, media, options, retries));
@@ -426,7 +435,7 @@ class WhatsAppClient {
                         const stats = fs.statSync(file.path);
                         if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { sendMediaAsDocument: true };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
@@ -714,7 +723,7 @@ class WhatsAppClient {
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false,
+        envioMultimediaJunto: boolean = true,
         replyMessageId?: string
     ): Promise<string> {
         if (!this.ready) {
@@ -733,13 +742,13 @@ class WhatsAppClient {
                         const stats = fs.statSync(file.path);
                         if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { caption: '' };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
                         const isFirst = (envioMultimediaJunto && i === 0 && message);
                         if (isFirst) {
-                            options.caption = message; // Attach message as caption to the first image
+                            options.caption = message;
                         }
 
                         await this.messageQueue.add(() => this.sendWithRetry(groupId, media, options, retries));
@@ -779,7 +788,7 @@ class WhatsAppClient {
                         const stats = fs.statSync(file.path);
                         if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { sendMediaAsDocument: true };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
@@ -797,6 +806,131 @@ class WhatsAppClient {
 
         await metricsService.trackGroupMessageSent(groupId, groupId, message.length, tags);
         return groupId;
+    }
+
+    /**
+     * Envía todos los archivos y el texto de UN destinatario sin usar la cola internamente.
+     * Llamar solo desde dentro de una tarea ya encolada.
+     */
+    private async sendRecipientDirect(
+        chatId: string,
+        message: string,
+        files: { multimedia?: string[]; archivo?: string[] },
+        tags: string[],
+        envioMultimediaJunto: boolean,
+        replyMessageId: string | undefined,
+    ): Promise<void> {
+        let messageSentWithMedia = false;
+
+        if (files.multimedia && files.multimedia.length > 0) {
+            for (let i = 0; i < files.multimedia.length; i++) {
+                const url = files.multimedia[i];
+                const file = await FileUtils.downloadFile(url, 'multimedia');
+                if (!file) continue;
+                try {
+                    const stats = fs.statSync(file.path);
+                    if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
+
+                    const media = this.buildMediaFromFile(file);
+                    const options: any = { caption: '' };
+                    if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                    const isFirst = envioMultimediaJunto && i === 0 && message;
+                    if (isFirst) options.caption = message;
+
+                    await this.sendWithRetry(chatId, media, options, 3);
+                    if (isFirst) messageSentWithMedia = true;
+                    await metricsService.trackMediaSent(chatId, 'multimedia', tags);
+                } catch (e: any) {
+                    console.error(`[WhatsApp] Error multimedia ${url} → ${chatId}:`, e);
+                    await metricsService.trackMediaFailed(chatId, e.message, tags);
+                } finally {
+                    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                }
+            }
+        }
+
+        if (message && !messageSentWithMedia) {
+            const options: any = {};
+            if (replyMessageId) options.quotedMessageId = replyMessageId;
+            await this.sendWithRetry(chatId, message, options, 3);
+        }
+
+        if (files.archivo && files.archivo.length > 0) {
+            for (const url of files.archivo) {
+                const file = await FileUtils.downloadFile(url, 'archivo');
+                if (!file) continue;
+                try {
+                    const stats = fs.statSync(file.path);
+                    if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
+
+                    const media = this.buildMediaFromFile(file);
+                    const options: any = { sendMediaAsDocument: true };
+                    if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                    await this.sendWithRetry(chatId, media, options, 3);
+                    await metricsService.trackFileSent(chatId, 'archivo', tags);
+                } catch (e: any) {
+                    console.error(`[WhatsApp] Error archivo ${url} → ${chatId}:`, e);
+                    await metricsService.trackFileFailed(chatId, e.message, tags);
+                } finally {
+                    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                }
+            }
+        }
+    }
+
+    /**
+     * Encola todos los destinatarios (fire-and-forget) y retorna inmediatamente.
+     * Cada destinatario es UN item en la cola (descarga lazy adentro del task).
+     */
+    public enqueueMessages(
+        numbers: string[],
+        groups: string[],
+        message: string,
+        files: { multimedia?: string[]; archivo?: string[] },
+        tags: string[],
+        envioMultimediaJunto: boolean,
+        replyMessageId: string | undefined,
+        callbacks: {
+            onSuccess: (recipient: string) => void;
+            onFailure: (recipient: string, error: string) => void;
+        }
+    ): { queued: string[]; rejected: string[] } {
+        const queued: string[] = [];
+        const rejected: string[] = [];
+
+        for (const recipient of [...numbers, ...groups]) {
+            const chatId = recipient.includes('@')
+                ? recipient
+                : `${recipient.replace(/\D/g, '')}@c.us`;
+
+            const accepted = this.messageQueue.enqueue(async () => {
+                try {
+                    await this.sendRecipientDirect(chatId, message, files, tags, envioMultimediaJunto, replyMessageId);
+                    callbacks.onSuccess(recipient);
+                    await metricsService.trackMessageSent(recipient, message.length, tags);
+                } catch (error: any) {
+                    callbacks.onFailure(recipient, error.message ?? 'Error desconocido');
+                    await metricsService.trackMessageFailed(recipient, error.message ?? 'Unknown', tags);
+                }
+            });
+
+            accepted ? queued.push(recipient) : rejected.push(recipient);
+        }
+
+        return { queued, rejected };
+    }
+
+    /** Estado actual de la cola de mensajes. */
+    public getQueueStatus() {
+        return {
+            size: this.messageQueue.size,
+            pending: this.messageQueue.pending,
+            estimatedWaitSec: this.messageQueue.estimatedWaitSec,
+            isProcessing: this.messageQueue.isProcessing,
+            isFull: this.messageQueue.isFull,
+        };
     }
 }
 
