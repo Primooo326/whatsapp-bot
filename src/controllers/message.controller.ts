@@ -32,18 +32,19 @@ class MessageController {
                 throw new AppError(503, 'El cliente de WhatsApp no está listo');
             }
 
-            const groups = to.filter(n => n.endsWith('@g.us'));
-            const numbers = to.filter(n => !n.endsWith('@g.us'));
+            const recipientsInOrder = [...to];
+            const forceEnvioMultimediaJunto = multimedia && multimedia.length > 0
+                ? true
+                : (envioMultimediaJunto ?? true);
 
             const jobId = jobManager.create(to.length);
 
             const { queued, rejected } = whatsAppClient.enqueueMessages(
-                numbers,
-                groups,
+                recipientsInOrder,
                 message ?? '',
                 { multimedia, archivo },
                 tags ?? [],
-                envioMultimediaJunto ?? true,
+                forceEnvioMultimediaJunto,
                 replyMessageId,
                 {
                     onSuccess: (r) => jobManager.recordSuccess(jobId, r),
@@ -146,8 +147,11 @@ class MessageController {
                 throw new AppError(400, 'El campo "tags" debe ser un array de strings');
             }
             if (!whatsAppClient.isReady()) throw new AppError(503, 'El cliente de WhatsApp no está listo');
+            const forceEnvioMultimediaJunto = multimedia && multimedia.length > 0
+                ? true
+                : (envioMultimediaJunto ?? true);
 
-            await whatsAppClient.sendToGroup(groupId, message, { multimedia, archivo }, 3, tags, envioMultimediaJunto, replyMessageId);
+            await whatsAppClient.sendToGroup(groupId, message, { multimedia, archivo }, 3, tags, forceEnvioMultimediaJunto, replyMessageId);
 
             res.status(200).json({ success: true, message: 'Mensaje enviado al grupo exitosamente' });
         } catch (error) {

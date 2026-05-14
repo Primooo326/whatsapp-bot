@@ -14,7 +14,7 @@ export class MessageQueue {
     private delayMs: number;
     private maxSize: number;
 
-    constructor(delayMs = 3000, maxSize = 500) {
+    constructor(delayMs = 1000, maxSize = 500) {
         this.delayMs = delayMs;
         this.maxSize = maxSize;
     }
@@ -45,20 +45,28 @@ export class MessageQueue {
     private async processNext(): Promise<void> {
         if (this.processing || this.queue.length === 0) return;
         this.processing = true;
-
-        const item = this.queue.shift()!;
-
         try {
-            const result = await item.task();
-            item.resolve(result);
-        } catch (error) {
-            item.reject(error);
+            while (this.queue.length > 0) {
+                const item = this.queue.shift()!;
+
+                try {
+                    const result = await item.task();
+                    item.resolve(result);
+                } catch (error) {
+                    item.reject(error);
+                }
+
+                // Evita pausas innecesarias cuando no hay más trabajo pendiente.
+                if (this.queue.length > 0 && this.delayMs > 0) {
+                    await new Promise(r => setTimeout(r, this.delayMs));
+                }
+            }
+        } finally {
+            this.processing = false;
+            if (this.queue.length > 0) {
+                this.processNext();
+            }
         }
-
-        await new Promise(r => setTimeout(r, this.delayMs));
-
-        this.processing = false;
-        this.processNext();
     }
 
     /** Tareas pendientes en cola (sin contar la que está en proceso). */

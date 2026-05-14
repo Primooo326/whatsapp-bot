@@ -15,7 +15,7 @@ class WhatsAppClient {
     private client: Client;
     private ready: boolean = false;
     private io: Server | null = null;
-    private messageQueue: MessageQueue = new MessageQueue(3000);
+    private messageQueue: MessageQueue = new MessageQueue(config.queue.delayMs, config.queue.maxSize);
 
     // Rutas para la estrategia de copiado local (Evita bloqueos de Azure Files)
     private sharedDataPath = path.join(process.cwd(), '.wwebjs_auth');
@@ -340,7 +340,7 @@ class WhatsAppClient {
                     error.message?.includes("Runtime.callFunctionOn");
 
                 if (shouldRetry && attempt < retries) {
-                    const delay = attempt * 5000; // 5s, 10s, 15s - tiempo de recuperación progresivo para Chromium
+                    const delay = attempt * config.send.retryBaseDelayMs;
                     console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s por error: ${error.message}`);
                     await new Promise(r => setTimeout(r, delay));
                 } else {
@@ -890,8 +890,7 @@ class WhatsAppClient {
      * Cada destinatario es UN item en la cola (descarga lazy adentro del task).
      */
     public enqueueMessages(
-        numbers: string[],
-        groups: string[],
+        recipients: string[],
         message: string,
         files: { multimedia?: string[]; archivo?: string[] },
         tags: string[],
@@ -912,7 +911,7 @@ class WhatsAppClient {
         };
         const frozenTags = [...tags];
 
-        for (const recipient of [...numbers, ...groups]) {
+        for (const recipient of recipients) {
             const chatId = recipient.includes('@')
                 ? recipient
                 : `${recipient.replace(/\D/g, '')}@c.us`;

@@ -1,11 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { metricsService } from '../services/metrics.service';
+import { config } from '../config';
 
 export class FileUtils {
     public static async downloadFile(url: string, type: 'multimedia' | 'archivo'): Promise<{ path: string; filename: string; mimetype: string } | null> {
+        let timeoutHandle: NodeJS.Timeout | null = null;
         try {
-            const response = await fetch(url);
+            const controller = new AbortController();
+            timeoutHandle = setTimeout(() => controller.abort(), config.downloads.timeoutMs);
+
+            const response = await fetch(url, { signal: controller.signal });
             if (!response.ok) {
                 throw new Error(`Failed to fetch ${url}: ${response.statusText}`);
             }
@@ -56,9 +61,18 @@ export class FileUtils {
 
             return { path: filePath, filename, mimetype: contentType };
         } catch (error: any) {
+            const isAbortError = error?.name === 'AbortError';
+            const mappedError = isAbortError
+                ? new Error(`Timeout descargando archivo después de ${config.downloads.timeoutMs}ms`)
+                : error;
+
             console.error(`[FileUtils] Error descargando archivo ${url}:`, error);
-            await metricsService.trackDownloadFailed(url, error.message);
+            await metricsService.trackDownloadFailed(url, mappedError.message);
             return null;
+        } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
         }
     }
 }

@@ -1,10 +1,25 @@
 import 'dotenv/config';
 
+const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+    const parsed = Number.parseInt(value || '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 export const config = {
     port: process.env.PORT || 3100,
     sessionId: process.env.WHATSAPP_SESSION_ID || 'default-session',
     mongodb: {
         uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/wha_metrics'
+    },
+    queue: {
+        delayMs: parsePositiveInt(process.env.MESSAGE_QUEUE_DELAY_MS, 1000),
+        maxSize: parsePositiveInt(process.env.MESSAGE_QUEUE_MAX_SIZE, 500),
+    },
+    send: {
+        retryBaseDelayMs: parsePositiveInt(process.env.WHATSAPP_RETRY_BASE_DELAY_MS, 3000),
+    },
+    downloads: {
+        timeoutMs: parsePositiveInt(process.env.WHATSAPP_DOWNLOAD_TIMEOUT_MS, 20000),
     },
     puppeteer: {
         headless: true,
