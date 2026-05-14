@@ -853,7 +853,12 @@ class WhatsAppClient {
         if (message && !messageSentWithMedia) {
             const options: any = {};
             if (replyMessageId) options.quotedMessageId = replyMessageId;
-            await this.sendWithRetry(chatId, message, options, 3);
+            try {
+                await this.sendWithRetry(chatId, message, options, 3);
+            } catch (e: any) {
+                console.error(`[WhatsApp] Error enviando texto → ${chatId}:`, e);
+                throw e;
+            }
         }
 
         if (files.archivo && files.archivo.length > 0) {
@@ -900,6 +905,13 @@ class WhatsAppClient {
         const queued: string[] = [];
         const rejected: string[] = [];
 
+        // Snapshot defensivo: las tasks pueden ejecutarse después de que el request HTTP termine
+        const frozenFiles = {
+            multimedia: files.multimedia ? [...files.multimedia] : undefined,
+            archivo: files.archivo ? [...files.archivo] : undefined,
+        };
+        const frozenTags = [...tags];
+
         for (const recipient of [...numbers, ...groups]) {
             const chatId = recipient.includes('@')
                 ? recipient
@@ -907,12 +919,12 @@ class WhatsAppClient {
 
             const accepted = this.messageQueue.enqueue(async () => {
                 try {
-                    await this.sendRecipientDirect(chatId, message, files, tags, envioMultimediaJunto, replyMessageId);
+                    await this.sendRecipientDirect(chatId, message, frozenFiles, frozenTags, envioMultimediaJunto, replyMessageId);
                     callbacks.onSuccess(recipient);
-                    await metricsService.trackMessageSent(recipient, message.length, tags);
+                    await metricsService.trackMessageSent(recipient, message.length, frozenTags);
                 } catch (error: any) {
                     callbacks.onFailure(recipient, error.message ?? 'Error desconocido');
-                    await metricsService.trackMessageFailed(recipient, error.message ?? 'Unknown', tags);
+                    await metricsService.trackMessageFailed(recipient, error.message ?? 'Unknown', frozenTags);
                 }
             });
 
