@@ -73,4 +73,32 @@ const startServer = async () => {
     }
 };
 
+// Graceful shutdown
+const gracefulShutdown = async (signal: string) => {
+    console.log(`\n[Server] Received ${signal}. Starting graceful shutdown...`);
+    
+    try {
+        console.log('[Server] Destroying WhatsApp client...');
+        await whatsAppClient.destroy();
+        console.log('[Server] WhatsApp client destroyed.');
+        
+        server.close(() => {
+            console.log('[Server] HTTP server closed.');
+            process.exit(0);
+        });
+        
+        // Force close after 10s
+        setTimeout(() => {
+            console.error('[Server] Could not close connections in time, forcefully shutting down');
+            process.exit(1);
+        }, 10000);
+    } catch (err) {
+        console.error('[Server] Error during graceful shutdown:', err);
+        process.exit(1);
+    }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 startServer();
