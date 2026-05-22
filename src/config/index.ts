@@ -32,7 +32,9 @@ export const config = {
             '--disable-component-update',
             '--disable-domain-reliability',
             '--disable-features=TranslateUI',
-            '--js-flags=--max-old-space-size=512'
+            '--js-flags=--max-old-space-size=512',
+            '--disk-cache-size=1',
+            '--media-cache-size=1'
         ]
     }
 } as const;

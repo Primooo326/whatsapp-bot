@@ -52,6 +52,21 @@ class WhatsAppClient {
         return WhatsAppClient.instance;
     }
 
+    private isExcludedPath(src: string, basePath: string): boolean {
+        const relative = path.relative(basePath, src);
+        const parts = relative.split(path.sep);
+        const excludeNames = [
+            'Cache',
+            'Code Cache',
+            'GPUCache',
+            'DawnWebGPUCache',
+            'Service Worker',
+            'Crashpad',
+            'blob_storage'
+        ];
+        return parts.some(part => excludeNames.includes(part) || part.startsWith('Singleton'));
+    }
+
     private syncSessionToLocal(): void {
         const sharedSessionPath = path.join(this.SHARED_AUTH_DIR, this.SESSION_NAME);
         const localSessionPath = path.join(this.LOCAL_AUTH_DIR, this.SESSION_NAME);
@@ -73,16 +88,11 @@ class WhatsAppClient {
         // Si existe en el volumen compartido, la copiamos a local
         if (fs.existsSync(sharedSessionPath)) {
             try {
-                console.log('[WhatsApp] Copiando sesión desde volumen compartido a local...');
+                console.log('[WhatsApp] Copiando sesión desde volumen compartido a local (excluyendo cache)...');
                 fs.cpSync(sharedSessionPath, localSessionPath, { 
                     recursive: true,
                     filter: (src, dest) => {
-                        const filename = path.basename(src);
-                        // No copiar locks a local para evitar que Chromium falle al iniciar
-                        if (filename.startsWith('Singleton')) {
-                            return false;
-                        }
-                        return true;
+                        return !this.isExcludedPath(src, sharedSessionPath);
                     }
                 });
                 console.log('[WhatsApp] Sesión copiada a local con éxito.');
@@ -94,13 +104,13 @@ class WhatsAppClient {
         }
     }
 
-    private syncSessionToShared(): void {
+    private async syncSessionToShared(): Promise<void> {
         const sharedSessionPath = path.join(this.SHARED_AUTH_DIR, this.SESSION_NAME);
         const localSessionPath = path.join(this.LOCAL_AUTH_DIR, this.SESSION_NAME);
 
         if (!fs.existsSync(localSessionPath)) return;
 
-        // console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files...');
+        // console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files de forma asíncrona...');
         
         try {
             // Asegurar que exista el directorio padre en el compartido
@@ -108,16 +118,12 @@ class WhatsAppClient {
                 fs.mkdirSync(this.SHARED_AUTH_DIR, { recursive: true });
             }
 
-            fs.cpSync(localSessionPath, sharedSessionPath, {
+            // Copiar de forma asíncrona para no bloquear el loop de eventos de Node.js
+            await fs.promises.cp(localSessionPath, sharedSessionPath, {
                 recursive: true,
                 force: true,
                 filter: (src, dest) => {
-                    const filename = path.basename(src);
-                    // IMPORTANTE: Excluir los archivos de bloqueo (Locks) de Chromium
-                    if (filename.startsWith('Singleton')) {
-                        return false;
-                    }
-                    return true;
+                    return !this.isExcludedPath(src, localSessionPath);
                 }
             });
             // console.log('[WhatsApp] Sesión sincronizada a la red con éxito.');
@@ -135,7 +141,9 @@ class WhatsAppClient {
         // Sincronizar a disco compartido cada 5 minutos
         this.syncInterval = setInterval(() => {
             if (this.ready) {
-                this.syncSessionToShared();
+                this.syncSessionToShared().catch(err => {
+                    console.error('[WhatsApp] Error en segundo plano al sincronizar sesión:', err);
+                });
             }
         }, 5 * 60 * 1000);
     }
@@ -610,7 +618,11 @@ class WhatsAppClient {
         console.log('[WhatsApp] Reiniciando cliente...');
         this.ready = false;
         if (this.syncInterval) clearInterval(this.syncInterval);
-        this.syncSessionToShared(); // Último sync antes de reiniciar
+        try {
+            await this.syncSessionToShared(); // Último sync antes de reiniciar (esperar a que termine)
+        } catch (e) {
+            console.error('[WhatsApp] Error sincronizando sesión antes de reiniciar:', e);
+        }
         if (this.io) {
             this.io.emit('whatsapp_status', { state: 'RESTARTING' });
         }
@@ -753,7 +765,11 @@ class WhatsAppClient {
 
     public async destroy(): Promise<void> {
         if (this.syncInterval) clearInterval(this.syncInterval);
-        this.syncSessionToShared();
+        try {
+            await this.syncSessionToShared(); // Asegurar sincronización final antes de destruir
+        } catch (e) {
+            console.error('[WhatsApp] Error sincronizando sesión antes de destruir:', e);
+        }
         await this.client.destroy();
     }
 
