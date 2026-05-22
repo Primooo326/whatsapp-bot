@@ -42,7 +42,8 @@ apt-get install -y --no-install-recommends \
     lsb-release \
     xdg-utils \
     wget \
-    nginx
+    nginx \
+    chromium
 
 # Limpiar cache para reducir tamaño de imagen
 apt-get clean

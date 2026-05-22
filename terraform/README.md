@@ -111,7 +111,7 @@ locals {
 
 ```hcl
 variable "target_port" {
-  default = 8080  # ← Puerto donde escucha el contenedor
+  default = 3005  # ← Puerto donde escucha el contenedor
 }
 ```
 

@@ -62,7 +62,7 @@ variable "is_public" {
 variable "target_port" {
   type        = number
   description = "Container target port"
-  default     = 3000
+  default     = 3005
 }
 
 variable "allow_insecure_connections" {
