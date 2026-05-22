@@ -1,6 +1,8 @@
 FROM node:24-slim AS builder
 WORKDIR /app
 
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+
 # Build backend
 COPY package*.json ./
 RUN npm install
@@ -14,6 +16,9 @@ RUN npm run build
 
 FROM node:24-slim AS runner
 WORKDIR /app
+
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copiar y ejecutar script de dependencias de Chromium
 COPY install-deps.sh ./
