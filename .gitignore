@@ -18,6 +18,13 @@ dist
 # Ignore lock files
 *.tfstate.lock.*
 
+# Logs and temp files
+logs/
+downloads/
+*.log
+*.out
+plan.out
+
 # Ignore crash logs
 crash.log
 tfplan

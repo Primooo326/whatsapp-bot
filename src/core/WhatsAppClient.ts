@@ -1,35 +1,41 @@
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import { Server } from 'socket.io';
 import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 import * as qrTerminal from 'qrcode-terminal';
+
+import * as path from 'path';
 
 import { config } from '../config';
 import { metricsService } from '../services/metrics.service';
 import { FileUtils } from '../utils/FileUtils';
 import { MessageQueue } from './MessageQueue';
 
+type GroupInfo = {
+    id: string;
+    name: string;
+    participants: string[];
+    image?: string;
+};
+
 class WhatsAppClient {
     private static instance: WhatsAppClient;
     private client: Client;
     private ready: boolean = false;
     private io: Server | null = null;
-    private messageQueue: MessageQueue = new MessageQueue(3000);
-    private syncInterval: NodeJS.Timeout | null = null;
+    private messageQueue: MessageQueue = new MessageQueue(config.queue.delayMs, config.queue.maxSize);
+    private groupsCache: { data: GroupInfo[]; expiresAt: number } | null = null;
 
-    // Rutas para la estrategia de Local Copy
-    private SHARED_AUTH_DIR = path.resolve(process.cwd(), '.wwebjs_auth');
-    private LOCAL_AUTH_DIR = path.join(os.tmpdir(), '.wwebjs_auth');
-    private SESSION_NAME = `session-${config.sessionId}`;
+    // Rutas para la estrategia de copiado local (Evita bloqueos de Azure Files)
+    private sharedDataPath = path.join(process.cwd(), '.wwebjs_auth');
+    private localDataPath = '/tmp/.wwebjs_auth';
 
     private constructor() {
-        this.syncSessionToLocal(); // <-- Sincronizar desde Azure Files a /tmp antes de iniciar
+        this.syncSessionToLocal();
 
         this.client = new Client({
-            authStrategy: new LocalAuth({ 
+            authStrategy: new LocalAuth({
                 clientId: config.sessionId,
-                dataPath: this.LOCAL_AUTH_DIR 
+                dataPath: this.localDataPath // IMPORTANTE: Ejecutar en /tmp local
             }),
             puppeteer: {
                 ...(config.puppeteer || {}),
@@ -45,54 +51,22 @@ class WhatsAppClient {
         this.setupEventListeners();
     }
 
-    public static getInstance(): WhatsAppClient {
-        if (!WhatsAppClient.instance) {
-            WhatsAppClient.instance = new WhatsAppClient();
-        }
-        return WhatsAppClient.instance;
-    }
-
-    private isExcludedPath(src: string, basePath: string): boolean {
-        const relative = path.relative(basePath, src);
-        const parts = relative.split(path.sep);
-        const excludeNames = [
-            'Cache',
-            'Code Cache',
-            'GPUCache',
-            'DawnWebGPUCache',
-            'Service Worker',
-            'Crashpad',
-            'blob_storage'
-        ];
-        return parts.some(part => excludeNames.includes(part) || part.startsWith('Singleton'));
-    }
-
     private syncSessionToLocal(): void {
-        const sharedSessionPath = path.join(this.SHARED_AUTH_DIR, this.SESSION_NAME);
-        const localSessionPath = path.join(this.LOCAL_AUTH_DIR, this.SESSION_NAME);
-
-        console.log(`[WhatsApp] Preparando estrategia Local Copy...`);
-        console.log(`[WhatsApp] Compartido (Azure Files): ${sharedSessionPath}`);
-        console.log(`[WhatsApp] Local (/tmp): ${localSessionPath}`);
-        
-        // Limpiar la carpeta local primero para evitar restos de ejecuciones previas
-        if (fs.existsSync(localSessionPath)) {
-            try {
-                fs.rmSync(localSessionPath, { recursive: true, force: true });
-                console.log('[WhatsApp] Carpeta local limpiada antes de copiar.');
-            } catch (e) {
-                console.warn('[WhatsApp] Error al limpiar carpeta local:', e);
-            }
+        console.log('[WhatsApp] Preparando almacenamiento temporal local...');
+        if (fs.existsSync(this.localDataPath)) {
+            fs.rmSync(this.localDataPath, { recursive: true, force: true });
         }
 
-        // Si existe en el volumen compartido, la copiamos a local
-        if (fs.existsSync(sharedSessionPath)) {
+        if (fs.existsSync(this.sharedDataPath)) {
+            console.log('[WhatsApp] Copiando sesión de Azure Files a local (/tmp) para evitar bloqueos...');
             try {
-                console.log('[WhatsApp] Copiando sesión desde volumen compartido a local (excluyendo cache)...');
-                fs.cpSync(sharedSessionPath, localSessionPath, { 
+                // Al copiar a local, ignoramos los candados viejos que pudieran haber quedado en Azure Files
+                fs.cpSync(this.sharedDataPath, this.localDataPath, {
                     recursive: true,
-                    filter: (src, dest) => {
-                        return !this.isExcludedPath(src, sharedSessionPath);
+                    force: true,
+                    filter: (source: string) => {
+                        const name = path.basename(source);
+                        return !name.startsWith('Singleton');
                     }
                 });
                 console.log('[WhatsApp] Sesión copiada a local con éxito.');
@@ -100,52 +74,47 @@ class WhatsAppClient {
                 console.error('[WhatsApp] Error copiando sesión a local:', error);
             }
         } else {
-            console.log('[WhatsApp] No hay sesión previa en el volumen compartido. Se creará una nueva.');
+            console.log('[WhatsApp] No se encontró sesión en Azure Files, se creará una nueva.');
         }
     }
 
-    private async syncSessionToShared(): Promise<void> {
-        const sharedSessionPath = path.join(this.SHARED_AUTH_DIR, this.SESSION_NAME);
-        const localSessionPath = path.join(this.LOCAL_AUTH_DIR, this.SESSION_NAME);
-
-        if (!fs.existsSync(localSessionPath)) return;
-
-        // console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files de forma asíncrona...');
-        
-        try {
-            // Asegurar que exista el directorio padre en el compartido
-            if (!fs.existsSync(this.SHARED_AUTH_DIR)) {
-                fs.mkdirSync(this.SHARED_AUTH_DIR, { recursive: true });
-            }
-
-            // Copiar de forma asíncrona para no bloquear el loop de eventos de Node.js
-            await fs.promises.cp(localSessionPath, sharedSessionPath, {
-                recursive: true,
-                force: true,
-                filter: (src, dest) => {
-                    return !this.isExcludedPath(src, localSessionPath);
-                }
-            });
-            // console.log('[WhatsApp] Sesión sincronizada a la red con éxito.');
-        } catch (error: any) {
-            console.error(`[WhatsApp] Error sincronizando sesión a la red:`, error.message);
-            // Si el error es EACCES/EBUSY, es probable que la otra réplica siga viva
-            if (error.code === 'EACCES' || error.code === 'EBUSY' || error.code === 'EPERM') {
-                console.log('[WhatsApp] Sincronización pospuesta debido a bloqueos de red (otra instancia podría estar cerrándose).');
-            }
-        }
-    }
-
-    private startBackgroundSync(): void {
-        if (this.syncInterval) clearInterval(this.syncInterval);
-        // Sincronizar a disco compartido cada 5 minutos
-        this.syncInterval = setInterval(() => {
-            if (this.ready) {
-                this.syncSessionToShared().catch(err => {
-                    console.error('[WhatsApp] Error en segundo plano al sincronizar sesión:', err);
+    private syncSessionToShared(): void {
+        if (fs.existsSync(this.localDataPath)) {
+            console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files...');
+            try {
+                // Sincronizar de vuelta para persistencia, filtrando los candados de Chromium
+                fs.cpSync(this.localDataPath, this.sharedDataPath, {
+                    recursive: true,
+                    force: true,
+                    filter: (source: string) => {
+                        const name = path.basename(source);
+                        return !name.startsWith('Singleton');
+                    }
                 });
+                console.log('[WhatsApp] Sincronización hacia la red completada.');
+            } catch (error: any) {
+                if (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'EBUSY') {
+                    console.warn('[WhatsApp] Sincronización pospuesta: Azure Files está bloqueado temporalmente (posiblemente la réplica vieja sigue viva).');
+                } else {
+                    console.error('[WhatsApp] Error sincronizando sesión a la red:', error.message);
+                }
             }
-        }, 5 * 60 * 1000);
+        }
+    }
+
+    public static getInstance(): WhatsAppClient {
+        if (!WhatsAppClient.instance) {
+            WhatsAppClient.instance = new WhatsAppClient();
+
+            // Sincronización periódica en segundo plano (cada 5 minutos)
+            // Esto asegura que la sesión se guarde incluso si el primer intento en 'ready' falló por candados
+            setInterval(() => {
+                if (WhatsAppClient.instance.ready) {
+                    WhatsAppClient.instance.syncSessionToShared();
+                }
+            }, 5 * 60 * 1000);
+        }
+        return WhatsAppClient.instance;
     }
 
     public setSocket(io: Server): void {
@@ -172,7 +141,7 @@ class WhatsAppClient {
 
         this.client.on('authenticated', () => {
             console.log('[WhatsApp] Autenticado con éxito');
-            this.syncSessionToShared(); // Sincronizar al autenticar
+            this.syncSessionToShared(); // Sincronizar nueva sesión
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'AUTHENTICATED' });
             }
@@ -188,8 +157,8 @@ class WhatsAppClient {
         this.client.on('ready', async () => {
             console.log('[WhatsApp] Cliente listo (evento ready)');
             this.ready = true;
-            this.syncSessionToShared(); // Sincronizar al estar listo
-            this.startBackgroundSync(); // Iniciar sync en background
+            this.invalidateGroupsCache();
+            this.syncSessionToShared(); // Asegurar sincronización del estado final
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'CONNECTED' });
             }
@@ -207,8 +176,8 @@ class WhatsAppClient {
         this.client.on('disconnected', async (reason) => {
             console.log('[WhatsApp] Desconectado:', reason);
             this.ready = false;
-            this.syncSessionToShared(); // Guardar estado al desconectar
-            if (this.syncInterval) clearInterval(this.syncInterval);
+            this.invalidateGroupsCache();
+            this.syncSessionToShared(); // Sincronizar la desconexión
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'DISCONNECTED', reason });
             }
@@ -379,9 +348,9 @@ class WhatsAppClient {
                     error.message?.includes("ProtocolError") ||
                     error.message?.includes("timed out") ||
                     error.message?.includes("Runtime.callFunctionOn");
-                    
+
                 if (shouldRetry && attempt < retries) {
-                    const delay = attempt * 5000; // 5s, 10s, 15s - tiempo de recuperación progresivo para Chromium
+                    const delay = attempt * config.send.retryBaseDelayMs;
                     console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s por error: ${error.message}`);
                     await new Promise(r => setTimeout(r, delay));
                 } else {
@@ -391,13 +360,84 @@ class WhatsAppClient {
         }
     }
 
+    private invalidateGroupsCache(): void {
+        this.groupsCache = null;
+    }
+
+    private getCachedGroups(): GroupInfo[] | null {
+        if (!this.groupsCache) {
+            return null;
+        }
+
+        if (Date.now() > this.groupsCache.expiresAt) {
+            this.groupsCache = null;
+            return null;
+        }
+
+        return this.groupsCache.data;
+    }
+
+    private setGroupsCache(groups: GroupInfo[]): void {
+        this.groupsCache = {
+            data: groups,
+            expiresAt: Date.now() + config.groups.cacheTtlMs,
+        };
+    }
+
+    private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+        let timeoutHandle: NodeJS.Timeout | undefined;
+        const timeoutPromise = new Promise<undefined>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve(undefined), timeoutMs);
+        });
+
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        } catch {
+            return undefined;
+        } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
+        }
+    }
+
+    private extractParticipants(chat: any): string[] {
+        const rawParticipants =
+            chat?.participants ||
+            chat?.groupMetadata?.participants ||
+            chat?.groupMetadata?._participants ||
+            [];
+
+        if (!Array.isArray(rawParticipants)) {
+            return [];
+        }
+
+        return rawParticipants
+            .map((participant: any) =>
+                participant?.id?.user ||
+                participant?.id?._serialized?.split('@')[0] ||
+                participant?.id ||
+                participant?.user,
+            )
+            .filter((value: unknown): value is string => typeof value === 'string' && value.length > 0);
+    }
+
+    private buildMediaFromFile(file: { path: string; filename: string; mimetype: string }): MessageMedia {
+        const b64data = fs.readFileSync(file.path, { encoding: 'base64' });
+        let mimeType = file.mimetype;
+        if (!mimeType || mimeType === 'application/octet-stream') {
+            mimeType = MessageMedia.fromFilePath(file.path).mimetype;
+        }
+        return new MessageMedia(mimeType, b64data, file.filename);
+    }
+
     public async sendMessage(
         phoneNumber: string,
         message: string,
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false,
+        envioMultimediaJunto: boolean = true,
         replyMessageId?: string
     ): Promise<void> {
         if (!this.ready) {
@@ -419,13 +459,13 @@ class WhatsAppClient {
                             throw new Error('El archivo excede el límite de 50MB');
                         }
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { caption: '' };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
                         const isFirst = (envioMultimediaJunto && i === 0 && message);
                         if (isFirst) {
-                            options.caption = message; // Attach message as caption
+                            options.caption = message;
                         }
 
                         await this.messageQueue.add(() => this.sendWithRetry(chatId, media, options, retries));
@@ -467,7 +507,7 @@ class WhatsAppClient {
                         const stats = fs.statSync(file.path);
                         if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { sendMediaAsDocument: true };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
@@ -512,38 +552,86 @@ class WhatsAppClient {
         return results;
     }
 
-    public async getGroups(): Promise<{ id: string; name: string; participants: string[] }[]> {
+    public async getGroups(): Promise<GroupInfo[]> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
         }
 
-        const chats = await this.client.getChats();
-        const groups = chats.filter(chat => chat.isGroup);
+        const cachedGroups = this.getCachedGroups();
+        if (cachedGroups) {
+            return cachedGroups;
+        }
 
-        const groupsData = await Promise.all(
-            groups.map(async (group) => {
-                const chat = await this.client.getChatById(group.id._serialized);
-                // @ts-ignore - participants exists on GroupChat
-                const participants = chat.participants?.map((p: any) => p.id.user) || [];
-
-                let imageUrl: string | undefined;
+        try {
+            // Intento 1: Extracción directa de Store de WhatsApp Web (Ultra rápido y resistente a timeouts)
+            // @ts-ignore
+            const rawGroups = await (this.client as any).pupPage.evaluate(() => {
                 try {
-                    imageUrl = await this.client.getProfilePicUrl(group.id._serialized);
+                    // @ts-ignore
+                    const chats = window.Store?.Chat?.getModelsArray() || [];
+                    return chats
+                        .filter((chat: any) => chat && (chat.isGroup || chat.id?._serialized?.includes('@g.us')))
+                        .map((chat: any) => {
+                            let participants: string[] = [];
+                            const rawParts = chat.groupMetadata?.participants || chat.participants || [];
+                            if (Array.isArray(rawParts)) {
+                                participants = rawParts
+                                    .map((p: any) => p?.id?.user || p?.id?._serialized?.split('@')[0] || p?.id || p?.user)
+                                    .filter((v: any) => typeof v === 'string' && v.length > 0);
+                            }
+                            return {
+                                id: chat.id?._serialized || String(chat.id),
+                                name: chat.name || chat.formattedTitle || chat.id?.user || 'Grupo',
+                                participants: participants
+                            };
+                        });
                 } catch (e) {
-                    // console.error(`[WhatsApp] Error obteniendo imagen para grupo ${group.name}:`, e);
+                    return null;
                 }
+            });
 
-                return {
-                    id: group.id._serialized,
-                    name: group.name,
-                    participants,
-                    image: imageUrl
-                };
-            })
-        );
+            if (rawGroups && Array.isArray(rawGroups) && rawGroups.length > 0) {
+                this.setGroupsCache(rawGroups);
+                await metricsService.trackGroupsFetched(rawGroups.length);
+                return rawGroups;
+            }
+        } catch (evalError) {
+            console.warn('[WhatsApp] Error en evaluación directa de grupos, usando método estándar:', evalError);
+        }
 
-        await metricsService.trackGroupsFetched(groupsData.length);
-        return groupsData;
+        // Fallback: Método estándar con timeout
+        try {
+            const chats = await this.withTimeout(this.client.getChats(), config.groups.listTimeoutMs);
+            if (!chats) {
+                if (this.groupsCache?.data) {
+                    return this.groupsCache.data;
+                }
+                throw new Error('Timeout obteniendo chats de WhatsApp');
+            }
+
+            const groups = chats.filter(chat => chat.isGroup);
+            const groupsData: GroupInfo[] = [];
+
+            for (const group of groups) {
+                const id = group.id?._serialized;
+                if (!id) continue;
+                const participants = this.extractParticipants(group);
+                groupsData.push({
+                    id,
+                    name: group.name || id,
+                    participants
+                });
+            }
+
+            this.setGroupsCache(groupsData);
+            await metricsService.trackGroupsFetched(groupsData.length);
+            return groupsData;
+        } catch (fallbackError: any) {
+            if (this.groupsCache?.data) {
+                return this.groupsCache.data;
+            }
+            throw new Error(`Error obteniendo grupos: ${fallbackError.message || fallbackError}`);
+        }
     }
 
     public async getChats(): Promise<{ name: string; number: string; image?: string }[]> {
@@ -551,28 +639,38 @@ class WhatsAppClient {
             throw new Error('WhatsApp client not ready');
         }
 
-        const chats = await this.client.getChats();
-        // Filter for individual chats (not groups)
-        const individualChats = chats.filter(chat => !chat.isGroup);
-
-        const chatsData = await Promise.all(
-            individualChats.map(async (chat) => {
-                let imageUrl: string | undefined;
+        try {
+            // @ts-ignore
+            const rawChats = await (this.client as any).pupPage.evaluate(() => {
                 try {
-                    imageUrl = await this.client.getProfilePicUrl(chat.id._serialized);
+                    // @ts-ignore
+                    const chats = window.Store?.Chat?.getModelsArray() || [];
+                    return chats
+                        .filter((chat: any) => chat && !chat.isGroup && !chat.id?._serialized?.includes('@g.us') && !chat.id?._serialized?.includes('@newsletter'))
+                        .map((chat: any) => {
+                            return {
+                                name: chat.name || chat.formattedTitle || chat.id?.user || '',
+                                number: chat.id?.user || chat.id?._serialized?.split('@')[0] || ''
+                            };
+                        });
                 } catch (e) {
-                    // console.error(`[WhatsApp] Error obteniendo imagen para chat ${chat.name}:`, e);
+                    return null;
                 }
+            });
 
-                return {
-                    name: chat.name,
-                    number: chat.id.user,
-                    image: imageUrl
-                };
-            })
-        );
+            if (rawChats && Array.isArray(rawChats)) {
+                return rawChats;
+            }
+        } catch (evalError) {
+            console.warn('[WhatsApp] Error en evaluación directa de chats, usando método estándar:', evalError);
+        }
 
-        return chatsData;
+        const chats = await this.client.getChats();
+        const individualChats = chats.filter(chat => !chat.isGroup);
+        return individualChats.map(chat => ({
+            name: chat.name,
+            number: chat.id.user
+        }));
     }
 
     public async getMediaFromMessage(messageId: string): Promise<{ data: string; mimetype: string; filename?: string } | null> {
@@ -617,12 +715,7 @@ class WhatsAppClient {
     public async restart(): Promise<void> {
         console.log('[WhatsApp] Reiniciando cliente...');
         this.ready = false;
-        if (this.syncInterval) clearInterval(this.syncInterval);
-        try {
-            await this.syncSessionToShared(); // Último sync antes de reiniciar (esperar a que termine)
-        } catch (e) {
-            console.error('[WhatsApp] Error sincronizando sesión antes de reiniciar:', e);
-        }
+        this.invalidateGroupsCache();
         if (this.io) {
             this.io.emit('whatsapp_status', { state: 'RESTARTING' });
         }
@@ -631,15 +724,9 @@ class WhatsAppClient {
         } catch (e) {
             console.warn('[WhatsApp] Error al destruir cliente (puede ser normal):', e);
         }
-        
-        this.syncSessionToLocal(); // Restaurar a local
-        
         // Recrear el cliente
         this.client = new Client({
-            authStrategy: new LocalAuth({ 
-                clientId: config.sessionId,
-                dataPath: this.LOCAL_AUTH_DIR 
-            }),
+            authStrategy: new LocalAuth({ clientId: config.sessionId }),
             puppeteer: {
                 ...(config.puppeteer || {}),
                 protocolTimeout: 0
@@ -660,7 +747,7 @@ class WhatsAppClient {
     public async logout(): Promise<void> {
         console.log('[WhatsApp] Cerrando sesión de WhatsApp...');
         this.ready = false;
-        if (this.syncInterval) clearInterval(this.syncInterval);
+        this.invalidateGroupsCache();
         if (this.io) {
             this.io.emit('whatsapp_status', { state: 'LOGGING_OUT' });
         }
@@ -674,27 +761,9 @@ class WhatsAppClient {
         } catch (e) {
             console.warn('[WhatsApp] Error al destruir cliente post-logout:', e);
         }
-        
-        // Limpiar las sesiones en ambos lados
-        const sharedSessionPath = path.join(this.SHARED_AUTH_DIR, this.SESSION_NAME);
-        const localSessionPath = path.join(this.LOCAL_AUTH_DIR, this.SESSION_NAME);
-        
-        [sharedSessionPath, localSessionPath].forEach(dir => {
-            if (fs.existsSync(dir)) {
-                try {
-                    fs.rmSync(dir, { recursive: true, force: true });
-                } catch (e) {
-                    console.warn(`[WhatsApp] Error limpiando ${dir}:`, e);
-                }
-            }
-        });
-
         // Recrear y reinicializar
         this.client = new Client({
-            authStrategy: new LocalAuth({ 
-                clientId: config.sessionId,
-                dataPath: this.LOCAL_AUTH_DIR
-            }),
+            authStrategy: new LocalAuth({ clientId: config.sessionId }),
             puppeteer: {
                 ...(config.puppeteer || {}),
                 protocolTimeout: 0
@@ -715,7 +784,7 @@ class WhatsAppClient {
     public async clearCacheAndRestart(): Promise<void> {
         console.log('[WhatsApp] Limpiando caché y reiniciando...');
         this.ready = false;
-        if (this.syncInterval) clearInterval(this.syncInterval);
+        this.invalidateGroupsCache();
         if (this.io) {
             this.io.emit('whatsapp_status', { state: 'CLEARING_CACHE' });
         }
@@ -726,12 +795,7 @@ class WhatsAppClient {
         }
 
         // Eliminar carpetas de caché
-        const cachePaths = [
-            this.SHARED_AUTH_DIR,
-            this.LOCAL_AUTH_DIR, 
-            '.wwebjs_cache'
-        ];
-        
+        const cachePaths = ['.wwebjs_auth', '.wwebjs_cache'];
         for (const cachePath of cachePaths) {
             try {
                 if (fs.existsSync(cachePath)) {
@@ -745,10 +809,7 @@ class WhatsAppClient {
 
         // Recrear y reinicializar
         this.client = new Client({
-            authStrategy: new LocalAuth({ 
-                clientId: config.sessionId,
-                dataPath: this.LOCAL_AUTH_DIR
-            }),
+            authStrategy: new LocalAuth({ clientId: config.sessionId }),
             puppeteer: {
                 ...(config.puppeteer || {}),
                 protocolTimeout: 0
@@ -763,14 +824,21 @@ class WhatsAppClient {
         await this.initialize();
     }
 
+    /**
+     * Destruye el cliente de WhatsApp y libera los recursos de Chromium
+     */
     public async destroy(): Promise<void> {
-        if (this.syncInterval) clearInterval(this.syncInterval);
+        console.log('[WhatsApp] Destruyendo cliente...');
+        this.ready = false;
+        this.invalidateGroupsCache();
         try {
-            await this.syncSessionToShared(); // Asegurar sincronización final antes de destruir
+            await this.client.destroy();
+            console.log('[WhatsApp] Cliente destruido correctamente');
+            this.syncSessionToShared(); // Sincronizar estado final
         } catch (e) {
-            console.error('[WhatsApp] Error sincronizando sesión antes de destruir:', e);
+            console.warn('[WhatsApp] Error al destruir cliente:', e);
+            this.syncSessionToShared(); // Intentar sincronizar incluso si hubo error
         }
-        await this.client.destroy();
     }
 
     /**
@@ -789,13 +857,14 @@ class WhatsAppClient {
         files: { multimedia?: string[], archivo?: string[] } = {},
         retries = 3,
         tags: string[] = [],
-        envioMultimediaJunto: boolean = false,
+        envioMultimediaJunto: boolean = true,
         replyMessageId?: string
     ): Promise<string> {
         if (!this.ready) {
             throw new Error('WhatsApp client not ready');
         }
 
+        const targetGroupId = groupId.includes('@') ? groupId : `${groupId}@g.us`;
         let messageSentWithMedia = false;
 
         // 1. Procesar Multimedia
@@ -808,25 +877,25 @@ class WhatsAppClient {
                         const stats = fs.statSync(file.path);
                         if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { caption: '' };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
                         const isFirst = (envioMultimediaJunto && i === 0 && message);
                         if (isFirst) {
-                            options.caption = message; // Attach message as caption to the first image
+                            options.caption = message;
                         }
 
-                        await this.messageQueue.add(() => this.sendWithRetry(groupId, media, options, retries));
+                        await this.messageQueue.add(() => this.sendWithRetry(targetGroupId, media, options, retries));
 
                         if (isFirst) {
                             messageSentWithMedia = true;
                         }
 
-                        await metricsService.trackMediaSent(groupId, 'multimedia', tags);
+                        await metricsService.trackMediaSent(targetGroupId, 'multimedia', tags);
                     } catch (e: any) {
-                        console.error(`[WhatsApp] Error enviando multimedia al grupo ${groupId}:`, e);
-                        await metricsService.trackMediaFailed(groupId, e.message, tags);
+                        console.error(`[WhatsApp] Error enviando multimedia al grupo ${targetGroupId}:`, e);
+                        await metricsService.trackMediaFailed(targetGroupId, e.message, tags);
                     } finally {
                         if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
                     }
@@ -839,9 +908,10 @@ class WhatsAppClient {
             let options: any = {};
             if (replyMessageId) options.quotedMessageId = replyMessageId;
             try {
-                await this.messageQueue.add(() => this.sendWithRetry(groupId, message, options, retries));
+                await this.messageQueue.add(() => this.sendWithRetry(targetGroupId, message, options, retries));
             } catch (e: any) {
-                console.error(`[WhatsApp] Error enviando mensaje de texto al grupo ${groupId}:`, e);
+                console.error(`[WhatsApp] Error enviando mensaje de texto al grupo ${targetGroupId}:`, e);
+                throw e;
             }
         }
 
@@ -854,15 +924,15 @@ class WhatsAppClient {
                         const stats = fs.statSync(file.path);
                         if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
 
-                        const media = MessageMedia.fromFilePath(file.path);
+                        const media = this.buildMediaFromFile(file);
                         let options: any = { sendMediaAsDocument: true };
                         if (replyMessageId) options.quotedMessageId = replyMessageId;
 
-                        await this.messageQueue.add(() => this.sendWithRetry(groupId, media, options, retries));
-                        await metricsService.trackFileSent(groupId, 'archivo', tags);
+                        await this.messageQueue.add(() => this.sendWithRetry(targetGroupId, media, options, retries));
+                        await metricsService.trackFileSent(targetGroupId, 'archivo', tags);
                     } catch (e: any) {
-                        console.error(`[WhatsApp] Error enviando archivo al grupo ${groupId}:`, e);
-                        await metricsService.trackFileFailed(groupId, e.message, tags);
+                        console.error(`[WhatsApp] Error enviando archivo al grupo ${targetGroupId}:`, e);
+                        await metricsService.trackFileFailed(targetGroupId, e.message, tags);
                     } finally {
                         if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
                     }
@@ -870,8 +940,144 @@ class WhatsAppClient {
             }
         }
 
-        await metricsService.trackGroupMessageSent(groupId, groupId, message.length, tags);
-        return groupId;
+        await metricsService.trackGroupMessageSent(targetGroupId, targetGroupId, message.length, tags);
+        return targetGroupId;
+    }
+
+    /**
+     * Envía todos los archivos y el texto de UN destinatario sin usar la cola internamente.
+     * Llamar solo desde dentro de una tarea ya encolada.
+     */
+    private async sendRecipientDirect(
+        chatId: string,
+        message: string,
+        files: { multimedia?: string[]; archivo?: string[] },
+        tags: string[],
+        envioMultimediaJunto: boolean,
+        replyMessageId: string | undefined,
+    ): Promise<void> {
+        let messageSentWithMedia = false;
+
+        if (files.multimedia && files.multimedia.length > 0) {
+            for (let i = 0; i < files.multimedia.length; i++) {
+                const url = files.multimedia[i];
+                const file = await FileUtils.downloadFile(url, 'multimedia');
+                if (!file) continue;
+                try {
+                    const stats = fs.statSync(file.path);
+                    if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
+
+                    const media = this.buildMediaFromFile(file);
+                    const options: any = { caption: '' };
+                    if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                    const isFirst = envioMultimediaJunto && i === 0 && message;
+                    if (isFirst) options.caption = message;
+
+                    await this.sendWithRetry(chatId, media, options, 3);
+                    if (isFirst) messageSentWithMedia = true;
+                    await metricsService.trackMediaSent(chatId, 'multimedia', tags);
+                } catch (e: any) {
+                    console.error(`[WhatsApp] Error multimedia ${url} → ${chatId}:`, e);
+                    await metricsService.trackMediaFailed(chatId, e.message, tags);
+                } finally {
+                    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                }
+            }
+        }
+
+        if (message && !messageSentWithMedia) {
+            const options: any = {};
+            if (replyMessageId) options.quotedMessageId = replyMessageId;
+            try {
+                await this.sendWithRetry(chatId, message, options, 3);
+            } catch (e: any) {
+                console.error(`[WhatsApp] Error enviando texto → ${chatId}:`, e);
+                throw e;
+            }
+        }
+
+        if (files.archivo && files.archivo.length > 0) {
+            for (const url of files.archivo) {
+                const file = await FileUtils.downloadFile(url, 'archivo');
+                if (!file) continue;
+                try {
+                    const stats = fs.statSync(file.path);
+                    if (stats.size > 50 * 1024 * 1024) throw new Error('El archivo excede el límite de 50MB');
+
+                    const media = this.buildMediaFromFile(file);
+                    const options: any = { sendMediaAsDocument: true };
+                    if (replyMessageId) options.quotedMessageId = replyMessageId;
+
+                    await this.sendWithRetry(chatId, media, options, 3);
+                    await metricsService.trackFileSent(chatId, 'archivo', tags);
+                } catch (e: any) {
+                    console.error(`[WhatsApp] Error archivo ${url} → ${chatId}:`, e);
+                    await metricsService.trackFileFailed(chatId, e.message, tags);
+                } finally {
+                    if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+                }
+            }
+        }
+    }
+
+    /**
+     * Encola todos los destinatarios (fire-and-forget) y retorna inmediatamente.
+     * Cada destinatario es UN item en la cola (descarga lazy adentro del task).
+     */
+    public enqueueMessages(
+        recipients: string[],
+        message: string,
+        files: { multimedia?: string[]; archivo?: string[] },
+        tags: string[],
+        envioMultimediaJunto: boolean,
+        replyMessageId: string | undefined,
+        callbacks: {
+            onSuccess: (recipient: string) => void;
+            onFailure: (recipient: string, error: string) => void;
+        }
+    ): { queued: string[]; rejected: string[] } {
+        const queued: string[] = [];
+        const rejected: string[] = [];
+
+        // Snapshot defensivo: las tasks pueden ejecutarse después de que el request HTTP termine
+        const frozenFiles = {
+            multimedia: files.multimedia ? [...files.multimedia] : undefined,
+            archivo: files.archivo ? [...files.archivo] : undefined,
+        };
+        const frozenTags = [...tags];
+
+        for (const recipient of recipients) {
+            const chatId = recipient.includes('@')
+                ? recipient
+                : `${recipient.replace(/\D/g, '')}@c.us`;
+
+            const accepted = this.messageQueue.enqueue(async () => {
+                try {
+                    await this.sendRecipientDirect(chatId, message, frozenFiles, frozenTags, envioMultimediaJunto, replyMessageId);
+                    callbacks.onSuccess(recipient);
+                    await metricsService.trackMessageSent(recipient, message.length, frozenTags);
+                } catch (error: any) {
+                    callbacks.onFailure(recipient, error.message ?? 'Error desconocido');
+                    await metricsService.trackMessageFailed(recipient, error.message ?? 'Unknown', frozenTags);
+                }
+            });
+
+            accepted ? queued.push(recipient) : rejected.push(recipient);
+        }
+
+        return { queued, rejected };
+    }
+
+    /** Estado actual de la cola de mensajes. */
+    public getQueueStatus() {
+        return {
+            size: this.messageQueue.size,
+            pending: this.messageQueue.pending,
+            estimatedWaitSec: this.messageQueue.estimatedWaitSec,
+            isProcessing: this.messageQueue.isProcessing,
+            isFull: this.messageQueue.isFull,
+        };
     }
 }
 

@@ -1,6 +1,8 @@
 /**
  * Cola de mensajes serializada para evitar sobrecarga de Chromium/Puppeteer.
- * Garantiza que solo un mensaje se envíe a la vez, con pausas configurables entre envíos.
+ * - Solo un mensaje se envía a la vez, con pausa configurable entre envíos.
+ * - `add()`: encola y espera el resultado (await).
+ * - `enqueue()`: fire-and-forget, retorna false si la cola está llena.
  */
 export class MessageQueue {
     private queue: Array<{
@@ -10,57 +12,83 @@ export class MessageQueue {
     }> = [];
     private processing = false;
     private delayMs: number;
+    private maxSize: number;
 
-    constructor(delayMs = 3000) {
+    constructor(delayMs = 1000, maxSize = 500) {
         this.delayMs = delayMs;
+        this.maxSize = maxSize;
     }
 
-    /**
-     * Agrega una tarea a la cola y espera su resultado.
-     * Las tareas se ejecutan secuencialmente, nunca en paralelo.
-     */
+    /** Encola una tarea y espera su resultado. Lanza error si la cola está llena. */
     async add<T>(task: () => Promise<T>): Promise<T> {
+        if (this.queue.length >= this.maxSize) {
+            throw new Error(`Cola llena (${this.maxSize} items). Reintenta más tarde.`);
+        }
         return new Promise<T>((resolve, reject) => {
             this.queue.push({ task, resolve, reject });
             this.processNext();
         });
     }
 
-    /**
-     * Procesa la siguiente tarea en la cola.
-     * Si ya se está procesando una tarea, no hace nada (se llamará de nuevo al terminar).
-     */
+    /** Fire-and-forget: encola sin esperar. Retorna false si la cola está llena. */
+    enqueue(task: () => Promise<any>): boolean {
+        if (this.queue.length >= this.maxSize) return false;
+        this.queue.push({
+            task,
+            resolve: () => { },
+            reject: (err) => console.error('[MessageQueue] Error en tarea:', err),
+        });
+        this.processNext();
+        return true;
+    }
+
     private async processNext(): Promise<void> {
         if (this.processing || this.queue.length === 0) return;
         this.processing = true;
-
-        const item = this.queue.shift()!;
-
         try {
-            const result = await item.task();
-            item.resolve(result);
-        } catch (error) {
-            item.reject(error);
+            while (this.queue.length > 0) {
+                const item = this.queue.shift()!;
+
+                try {
+                    const result = await item.task();
+                    item.resolve(result);
+                } catch (error) {
+                    item.reject(error);
+                }
+
+                // Evita pausas innecesarias cuando no hay más trabajo pendiente.
+                if (this.queue.length > 0 && this.delayMs > 0) {
+                    await new Promise(r => setTimeout(r, this.delayMs));
+                }
+            }
+        } finally {
+            this.processing = false;
+            if (this.queue.length > 0) {
+                this.processNext();
+            }
         }
-
-        // Pausa entre mensajes para no saturar Chromium
-        await new Promise(r => setTimeout(r, this.delayMs));
-
-        this.processing = false;
-        this.processNext();
     }
 
-    /**
-     * Retorna el número de tareas pendientes en la cola.
-     */
+    /** Tareas pendientes en cola (sin contar la que está en proceso). */
     get pending(): number {
         return this.queue.length;
     }
 
-    /**
-     * Retorna si la cola está procesando una tarea.
-     */
+    /** Total de tareas en cola + la que se está procesando actualmente. */
+    get size(): number {
+        return this.queue.length + (this.processing ? 1 : 0);
+    }
+
+    /** Tiempo estimado hasta procesar todo (segundos). */
+    get estimatedWaitSec(): number {
+        return Math.round(this.size * this.delayMs / 1000);
+    }
+
     get isProcessing(): boolean {
         return this.processing;
+    }
+
+    get isFull(): boolean {
+        return this.queue.length >= this.maxSize;
     }
 }

@@ -6,7 +6,7 @@ image_name     = "wha-bot:latest"
 cpu_cores    = 0.5
 memory       = "1Gi"
 min_replicas = 1
-max_replicas = 2
+max_replicas = 1
 
 is_public                  = true
 target_port                = 3100
