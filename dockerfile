@@ -39,4 +39,4 @@ COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 CMD ["./docker-entrypoint.sh"]
 
-EXPOSE 8080
+EXPOSE 3100

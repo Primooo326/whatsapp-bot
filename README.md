@@ -88,7 +88,7 @@ npm start
 docker-compose up -d
 ```
 
-El servicio estará en `http://localhost:8080` (nginx) y la API en `http://localhost:3100`
+El servicio estará en `http://localhost:3100` (nginx) y la API en `http://localhost:3100`
 
 ---
 
