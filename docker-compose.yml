@@ -5,7 +5,6 @@ services:
       dockerfile: dockerfile
     ports:
       - "3100:3100"
-      - "3100:3100"
     volumes:
       - ./logs:/app/logs
       - ./.wwebjs_auth:/app/.wwebjs_auth
@@ -22,5 +21,6 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+      - PORT=3101
       - TZ=America/Bogota
 
