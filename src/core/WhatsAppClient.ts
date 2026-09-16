@@ -10,6 +10,11 @@ import { metricsService } from '../services/metrics.service';
 import { FileUtils } from '../utils/FileUtils';
 import { MessageQueue } from './MessageQueue';
 
+const WEB_VERSION_CACHE_CONFIG = {
+    type: 'remote' as const,
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1047079153-alpha.html'
+};
+
 class WhatsAppClient {
     private static instance: WhatsAppClient;
     private client: Client;
@@ -36,10 +41,7 @@ class WhatsAppClient {
                 protocolTimeout: 0 // Timeout infinito para evitar ProtocolError: Runtime.callFunctionOn
             },
             qrMaxRetries: 0, // 0 = unlimited retries
-            webVersionCache: {
-                type: 'remote',
-                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
-            }
+            webVersionCache: WEB_VERSION_CACHE_CONFIG
         });
 
         this.setupEventListeners();
@@ -55,6 +57,7 @@ class WhatsAppClient {
     private isExcludedPath(src: string, basePath: string): boolean {
         const relative = path.relative(basePath, src);
         const parts = relative.split(path.sep);
+        const fileName = parts[parts.length - 1] || '';
         const excludeNames = [
             'Cache',
             'Code Cache',
@@ -64,7 +67,10 @@ class WhatsAppClient {
             'Crashpad',
             'blob_storage'
         ];
-        return parts.some(part => excludeNames.includes(part) || part.startsWith('Singleton'));
+        if (parts.some(part => excludeNames.includes(part))) return true;
+        if (fileName.startsWith('Singleton')) return true;
+        if (fileName.endsWith('.lock') || fileName === 'LOCK') return true;
+        return false;
     }
 
     private syncSessionToLocal(): void {
@@ -88,7 +94,7 @@ class WhatsAppClient {
         // Si existe en el volumen compartido, la copiamos a local
         if (fs.existsSync(sharedSessionPath)) {
             try {
-                console.log('[WhatsApp] Copiando sesión desde volumen compartido a local (excluyendo cache)...');
+                console.log('[WhatsApp] Copiando sesión desde volumen compartido a local (excluyendo cache y locks)...');
                 fs.cpSync(sharedSessionPath, localSessionPath, { 
                     recursive: true,
                     filter: (src, dest) => {
@@ -109,8 +115,6 @@ class WhatsAppClient {
         const localSessionPath = path.join(this.LOCAL_AUTH_DIR, this.SESSION_NAME);
 
         if (!fs.existsSync(localSessionPath)) return;
-
-        // console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files de forma asíncrona...');
         
         try {
             // Asegurar que exista el directorio padre en el compartido
@@ -126,12 +130,15 @@ class WhatsAppClient {
                     return !this.isExcludedPath(src, localSessionPath);
                 }
             });
-            // console.log('[WhatsApp] Sesión sincronizada a la red con éxito.');
+            console.log('[WhatsApp] Sincronización hacia la red completada.');
         } catch (error: any) {
-            console.error(`[WhatsApp] Error sincronizando sesión a la red:`, error.message);
-            // Si el error es EACCES/EBUSY, es probable que la otra réplica siga viva
-            if (error.code === 'EACCES' || error.code === 'EBUSY' || error.code === 'EPERM') {
+            if (error.code === 'ENOENT') {
+                // Archivo temporal de LevelDB rotado por Chrome durante la copia, omitir de forma segura
+                console.log('[WhatsApp] Sincronización omitió archivos temporales en rotación (ENOENT).');
+            } else if (error.code === 'EACCES' || error.code === 'EBUSY' || error.code === 'EPERM') {
                 console.log('[WhatsApp] Sincronización pospuesta debido a bloqueos de red (otra instancia podría estar cerrándose).');
+            } else {
+                console.error(`[WhatsApp] Error sincronizando sesión a la red:`, error.message);
             }
         }
     }
@@ -172,7 +179,6 @@ class WhatsAppClient {
 
         this.client.on('authenticated', () => {
             console.log('[WhatsApp] Autenticado con éxito');
-            this.syncSessionToShared(); // Sincronizar al autenticar
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'AUTHENTICATED' });
             }
@@ -334,16 +340,9 @@ class WhatsAppClient {
                 resolve();
             });
 
-            // Fallback: esperar después de autenticación y marcar como listo
             this.client.once('authenticated', () => {
-                console.log('[WhatsApp] Autenticado, esperando evento ready...');
-
-                setTimeout(() => {
-                    if (this.ready) return;
-                    console.log('[WhatsApp] Evento ready no recibido después de 60s, marcando como listo...');
-                    this.ready = true;
-                    resolve();
-                }, 60000);
+                console.log('[WhatsApp] Autenticado, esperando sincronización completa de WhatsApp Web (evento ready)...');
+                resolve(); // Permite levantar el servidor HTTP mientras WhatsApp Web completa la carga
             });
 
             this.client.once('auth_failure', (msg) => {
@@ -645,10 +644,7 @@ class WhatsAppClient {
                 protocolTimeout: 0
             },
             qrMaxRetries: 0,
-            webVersionCache: {
-                type: 'remote',
-                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
-            }
+            webVersionCache: WEB_VERSION_CACHE_CONFIG
         });
         this.setupEventListeners();
         await this.initialize();
@@ -700,10 +696,7 @@ class WhatsAppClient {
                 protocolTimeout: 0
             },
             qrMaxRetries: 0,
-            webVersionCache: {
-                type: 'remote',
-                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
-            }
+            webVersionCache: WEB_VERSION_CACHE_CONFIG
         });
         this.setupEventListeners();
         await this.initialize();
@@ -754,10 +747,7 @@ class WhatsAppClient {
                 protocolTimeout: 0
             },
             qrMaxRetries: 0,
-            webVersionCache: {
-                type: 'remote',
-                remotePath: 'https://raw.githubusercontent.com/AhmadMujtaba200210/legacy/main/2.3000.1017054254-alpha.html'
-            }
+            webVersionCache: WEB_VERSION_CACHE_CONFIG
         });
         this.setupEventListeners();
         await this.initialize();
