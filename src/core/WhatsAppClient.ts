@@ -10,6 +10,11 @@ import { metricsService } from '../services/metrics.service';
 import { FileUtils } from '../utils/FileUtils';
 import { MessageQueue } from './MessageQueue';
 
+const WEB_VERSION_CACHE_CONFIG = {
+    type: 'remote' as const,
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1047079153-alpha.html'
+};
+
 type GroupInfo = {
     id: string;
     name: string;
