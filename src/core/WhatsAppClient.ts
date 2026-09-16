@@ -31,17 +31,18 @@ class WhatsAppClient {
     private messageQueue: MessageQueue = new MessageQueue(config.queue.delayMs, config.queue.maxSize);
     private groupsCache: { data: GroupInfo[]; expiresAt: number } | null = null;
 
-    // Rutas para la estrategia de copiado local (Evita bloqueos de Azure Files)
-    private sharedDataPath = path.join(process.cwd(), '.wwebjs_auth');
-    private localDataPath = '/tmp/.wwebjs_auth';
+    private authDataPath = path.join(process.cwd(), '.wwebjs_auth');
 
     private constructor() {
-        this.syncSessionToLocal();
+        this.client = this.createClient();
+        this.setupEventListeners();
+    }
 
-        this.client = new Client({
+    private createClient(): Client {
+        return new Client({
             authStrategy: new LocalAuth({
                 clientId: config.sessionId,
-                dataPath: this.localDataPath // IMPORTANTE: Ejecutar en /tmp local
+                dataPath: this.authDataPath
             }),
             puppeteer: {
                 ...(config.puppeteer || {}),
@@ -50,72 +51,11 @@ class WhatsAppClient {
             qrMaxRetries: 0, // 0 = unlimited retries
             webVersionCache: WEB_VERSION_CACHE_CONFIG
         });
-
-        this.setupEventListeners();
-    }
-
-    private syncSessionToLocal(): void {
-        console.log('[WhatsApp] Preparando almacenamiento temporal local...');
-        if (fs.existsSync(this.localDataPath)) {
-            fs.rmSync(this.localDataPath, { recursive: true, force: true });
-        }
-
-        if (fs.existsSync(this.sharedDataPath)) {
-            console.log('[WhatsApp] Copiando sesión de Azure Files a local (/tmp) para evitar bloqueos...');
-            try {
-                // Al copiar a local, ignoramos los candados viejos que pudieran haber quedado en Azure Files
-                fs.cpSync(this.sharedDataPath, this.localDataPath, {
-                    recursive: true,
-                    force: true,
-                    filter: (source: string) => {
-                        const name = path.basename(source);
-                        return !name.startsWith('Singleton');
-                    }
-                });
-                console.log('[WhatsApp] Sesión copiada a local con éxito.');
-            } catch (error) {
-                console.error('[WhatsApp] Error copiando sesión a local:', error);
-            }
-        } else {
-            console.log('[WhatsApp] No se encontró sesión en Azure Files, se creará una nueva.');
-        }
-    }
-
-    private syncSessionToShared(): void {
-        if (fs.existsSync(this.localDataPath)) {
-            console.log('[WhatsApp] Sincronizando sesión local (/tmp) hacia Azure Files...');
-            try {
-                // Sincronizar de vuelta para persistencia, filtrando los candados de Chromium
-                fs.cpSync(this.localDataPath, this.sharedDataPath, {
-                    recursive: true,
-                    force: true,
-                    filter: (source: string) => {
-                        const name = path.basename(source);
-                        return !name.startsWith('Singleton');
-                    }
-                });
-                console.log('[WhatsApp] Sincronización hacia la red completada.');
-            } catch (error: any) {
-                if (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'EBUSY') {
-                    console.warn('[WhatsApp] Sincronización pospuesta: Azure Files está bloqueado temporalmente (posiblemente la réplica vieja sigue viva).');
-                } else {
-                    console.error('[WhatsApp] Error sincronizando sesión a la red:', error.message);
-                }
-            }
-        }
     }
 
     public static getInstance(): WhatsAppClient {
         if (!WhatsAppClient.instance) {
             WhatsAppClient.instance = new WhatsAppClient();
-
-            // Sincronización periódica en segundo plano (cada 5 minutos)
-            // Esto asegura que la sesión se guarde incluso si el primer intento en 'ready' falló por candados
-            setInterval(() => {
-                if (WhatsAppClient.instance.ready) {
-                    WhatsAppClient.instance.syncSessionToShared();
-                }
-            }, 5 * 60 * 1000);
         }
         return WhatsAppClient.instance;
     }
@@ -144,7 +84,6 @@ class WhatsAppClient {
 
         this.client.on('authenticated', () => {
             console.log('[WhatsApp] Autenticado con éxito');
-            this.syncSessionToShared(); // Sincronizar nueva sesión
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'AUTHENTICATED' });
             }
@@ -182,7 +121,6 @@ class WhatsAppClient {
             console.log('[WhatsApp] Cliente listo (evento ready)');
             this.ready = true;
             this.invalidateGroupsCache();
-            this.syncSessionToShared(); // Asegurar sincronización del estado final
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'CONNECTED' });
             }
@@ -205,7 +143,6 @@ class WhatsAppClient {
             }
             this.ready = false;
             this.invalidateGroupsCache();
-            this.syncSessionToShared(); // Sincronizar la desconexión
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'DISCONNECTED', reason });
             }
@@ -766,15 +703,7 @@ class WhatsAppClient {
             console.warn('[WhatsApp] Error al destruir cliente (puede ser normal):', e);
         }
         // Recrear el cliente
-        this.client = new Client({
-            authStrategy: new LocalAuth({ clientId: config.sessionId }),
-            puppeteer: {
-                ...(config.puppeteer || {}),
-                protocolTimeout: 0
-            },
-            qrMaxRetries: 0,
-            webVersionCache: WEB_VERSION_CACHE_CONFIG
-        });
+        this.client = this.createClient();
         this.setupEventListeners();
         await this.initialize();
     }
@@ -804,15 +733,7 @@ class WhatsAppClient {
             console.warn('[WhatsApp] Error al destruir cliente post-logout:', e);
         }
         // Recrear y reinicializar
-        this.client = new Client({
-            authStrategy: new LocalAuth({ clientId: config.sessionId }),
-            puppeteer: {
-                ...(config.puppeteer || {}),
-                protocolTimeout: 0
-            },
-            qrMaxRetries: 0,
-            webVersionCache: WEB_VERSION_CACHE_CONFIG
-        });
+        this.client = this.createClient();
         this.setupEventListeners();
         await this.initialize();
     }
@@ -851,15 +772,7 @@ class WhatsAppClient {
         }
 
         // Recrear y reinicializar
-        this.client = new Client({
-            authStrategy: new LocalAuth({ clientId: config.sessionId }),
-            puppeteer: {
-                ...(config.puppeteer || {}),
-                protocolTimeout: 0
-            },
-            qrMaxRetries: 0,
-            webVersionCache: WEB_VERSION_CACHE_CONFIG
-        });
+        this.client = this.createClient();
         this.setupEventListeners();
         await this.initialize();
     }
@@ -878,10 +791,8 @@ class WhatsAppClient {
         try {
             await this.client.destroy();
             console.log('[WhatsApp] Cliente destruido correctamente');
-            this.syncSessionToShared(); // Sincronizar estado final
         } catch (e) {
             console.warn('[WhatsApp] Error al destruir cliente:', e);
-            this.syncSessionToShared(); // Intentar sincronizar incluso si hubo error
         }
     }
 
