@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: dockerfile
     ports:
-      - "8080:8080"
       - "3100:3100"
     volumes:
       - ./logs:/app/logs
@@ -22,5 +21,6 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+      - PORT=3101
       - TZ=America/Bogota
 

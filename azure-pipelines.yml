@@ -1,23 +1,49 @@
 trigger:
-- main
+  - main
 
 resources:
-- repo: self
+  - repo: self
 
 variables:
   tag: '$(Build.BuildId)'
-  dockerRegistryServiceConnection: "oberon360Registry"
+  dockerRegistryServiceConnection: "oberon360RegistryContainer"
   containerRegistry: "oberonregistry.azurecr.io"
-  envFileName: ".env.wha-bot"
   imageRepository: "wha-bot"
-  sshConnection: "oberon360backvm"
+  azureServiceConnection: "AZ-suscription-DESARROLLO"
+  resourceGroupName: "DESARROLLO"
+  containerAppName: "wha-bot"
 
 stages:
   # ==========================================
-  # STAGE 1: CONSTRUCCIÓN Y SUBIDA
+  # STAGE 1: CALIDAD DE CÓDIGO (QA)
+  # ==========================================
+  - stage: QualityGate
+    displayName: "🔍 Quality Gate"
+    jobs:
+      - job: BuildCheck
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '24.x'
+            displayName: 'Install Node.js'
+
+          - script: |
+              npm ci
+            displayName: 'Install Dependencies'
+
+          - script: |
+              npm run build
+            displayName: 'Build TypeScript'
+
+  # ==========================================
+  # STAGE 2: CONSTRUCCIÓN Y SUBIDA (ACR)
   # ==========================================
   - stage: BuildAndPush
     displayName: "📦 Build & Push"
+    dependsOn: QualityGate
+    condition: succeeded()
     jobs:
       - job: Build
         pool:
@@ -26,70 +52,60 @@ stages:
           - script: |
               curl -s -X POST "$(WHA_URL)" \
                 -H "Content-Type: application/json" \
-                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"🚀 *[Wha-Bot]* Iniciando Build\n📌 Rama: *$(Build.SourceBranch)*\n🏷️ Entorno: *$(branchLabel)*\"}" || true
+                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"🚀 *[Wha-Bot]* Calidad validada. Iniciando Build...\"}" || true
             displayName: "🔔 WhatsApp - Inicio"
 
-          - task: DownloadSecureFile@1
-            name: envFile
+          - task: Docker@2
+            displayName: Login to ACR
             inputs:
-              secureFile: $(envFileName)
+              command: login
+              containerRegistry: $(dockerRegistryServiceConnection)
 
           - script: |
-              cp $(envFile.secureFilePath) .env
-              [ -f "docker/.dockerignore" ] && cp docker/.dockerignore .
-            displayName: "Preparar Contexto"
+              docker buildx create --use
+              docker buildx build \
+                --platform linux/amd64 \
+                --provenance=false \
+                -f dockerfile \
+                -t $(containerRegistry)/$(imageRepository):$(tag) \
+                -t $(containerRegistry)/$(imageRepository):latest \
+                --push .
+            displayName: "Build and Push Image"
 
-          - task: Docker@2
-            displayName: "Build and Push to ACR"
-            inputs:
-              containerRegistry: $(dockerRegistryServiceConnection)
-              repository: $(imageRepository)
-              command: "buildAndPush"
-              dockerfile: $(dockerfilePath)
-              buildContext: "."
-              tags: |
-                $(tag)
-                $(Build.BuildId)
   # ==========================================
-  # STAGE 2: DESPLIEGUE EN DOCKER SWARM
+  # STAGE 3: DESPLIEGUE (AZURE CONTAINER APPS)
   # ==========================================
   - stage: Deploy
-    displayName: "🚀 Deploy to Swarm"
+    displayName: "🚀 Deploy to ACA"
     dependsOn: BuildAndPush
     condition: succeeded()
     jobs:
-      - job: SwarmDeploy
+      - job: ACADeploy
         pool:
           vmImage: "ubuntu-latest"
         steps:
-          - task: SSH@0
-            displayName: "Ejecutar Update en VM"
+          - task: AzureCLI@2
+            displayName: "Actualizar Imagen en ACA"
             inputs:
-              sshEndpoint: $(sshConnection)
-              runOptions: "inline"
-              inline: |
-                set -e
-                echo "🔄 Actualizando servicio wha-bot_wha-bot..."
-                sudo docker service update \
-                  --image $(containerRegistry)/$(imageRepository):$(Build.BuildId) \
-                  --with-registry-auth \
-                  wha-bot_wha-bot
+              azureSubscription: $(azureServiceConnection)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az containerapp update \
+                  --name $(containerAppName) \
+                  --resource-group $(resourceGroupName) \
+                  --image $(containerRegistry)/$(imageRepository):$(tag)
 
-                echo "📊 Estado de las réplicas:"
-                sudo docker service ps wha-bot_wha-bot --no-trunc | head -n 5
-
-          # NOTIFICACIÓN DE ÉXITO FINAL
           - script: |
               curl -s -X POST "$(WHA_URL)" \
                 -H "Content-Type: application/json" \
-                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"✅ *[Wha-Bot]* Despliegue EXITOSO\n🌐 Entorno: *$(branchLabel)*\n📦 Imagen: *$(imageRepository)*\n🔢 Build ID: *$(Build.BuildId)*\"}" || true
+                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"✅ *[Wha-Bot]* Despliegue EXITOSO\n🌐 App: *$(containerAppName)*\n🔢 Tag: *$(tag)*\"}" || true
             displayName: "🔔 WhatsApp - Éxito"
             condition: succeeded()
 
-          # NOTIFICACIÓN DE ERROR FINAL
           - script: |
               curl -s -X POST "$(WHA_URL)" \
                 -H "Content-Type: application/json" \
-                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"❌ *[Wha-Bot]* FALLO EN DESPLIEGUE\n📌 Rama: *$(Build.SourceBranch)*\n⚠️ Revisa los logs de la tarea SSH en Azure DevOps.\"}" || true
+                -d "{\"to\":[\"$(WHA_GROUP)\"],\"message\":\"❌ *[Wha-Bot]* FALLO EN EL DESPLIEGUE\"}" || true
             displayName: "🔔 WhatsApp - Fallo"
             condition: failed()

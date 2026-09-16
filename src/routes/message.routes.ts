@@ -19,6 +19,12 @@ router.get('/health', (_req: Request, res: Response<HealthResponse>) => {
 // Send message to individual contacts
 router.post('/send', (req, res, next) => messageController.sendMessage(req, res, next));
 
+// Job status (fire-and-forget tracking)
+router.get('/jobs/:id', (req, res, next) => messageController.getJobStatus(req, res, next));
+
+// Queue status
+router.get('/queue/status', (req, res, next) => messageController.getQueueStatus(req, res, next));
+
 // Get all groups
 router.get('/groups', (req, res, next) => messageController.getGroups(req, res, next));
 

@@ -59,6 +59,8 @@ locals {
   env_vars = [
     { name = "APPINSIGHTS-CONNECTION-STRING", value = module.monitoring.connection_string },
     { name = "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD", value = "true" },
+    # WHATSAPP_SESSION_ID=your-session-id
+    { name = "WHATSAPP_SESSION_ID", value = "session-xxx" },
   ]
 
   secret_env_vars = [
