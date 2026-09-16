@@ -8,6 +8,7 @@ const parsePositiveInt = (value: string | undefined, fallback: number): number =
 export const config = {
     port: parsePositiveInt(process.env.PORT, 3101),
     sessionId: process.env.WHATSAPP_SESSION_ID || 'default-session',
+    webVersionCacheUrl: process.env.WHATSAPP_WEB_VERSION_URL || 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1047079153-alpha.html',
     mongodb: {
         uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/wha_metrics'
     },

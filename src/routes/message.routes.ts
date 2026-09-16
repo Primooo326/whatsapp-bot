@@ -47,6 +47,7 @@ router.get('/session/status', (req, res, next) => sessionController.getStatus(re
 router.post('/session/restart', (req, res, next) => sessionController.restart(req, res, next));
 router.post('/session/logout', (req, res, next) => sessionController.logout(req, res, next));
 router.post('/session/clear', (req, res, next) => sessionController.clearCache(req, res, next));
+router.post('/session/clear-cache', (req, res, next) => sessionController.clearCache(req, res, next));
 
 // Logs endpoint
 router.get('/logs', (req, res, next) => sessionController.getLogs(req, res, next));

@@ -12,7 +12,7 @@ import { MessageQueue } from './MessageQueue';
 
 const WEB_VERSION_CACHE_CONFIG = {
     type: 'remote' as const,
-    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1047079153-alpha.html'
+    remotePath: config.webVersionCacheUrl
 };
 
 type GroupInfo = {
@@ -26,6 +26,7 @@ class WhatsAppClient {
     private static instance: WhatsAppClient;
     private client: Client;
     private ready: boolean = false;
+    private readyTimeout: NodeJS.Timeout | null = null;
     private io: Server | null = null;
     private messageQueue: MessageQueue = new MessageQueue(config.queue.delayMs, config.queue.maxSize);
     private groupsCache: { data: GroupInfo[]; expiresAt: number } | null = null;
@@ -147,16 +148,37 @@ class WhatsAppClient {
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'AUTHENTICATED' });
             }
+
+            // Iniciar temporizador de seguridad de 120s para el evento ready real
+            if (this.readyTimeout) clearTimeout(this.readyTimeout);
+            this.readyTimeout = setTimeout(async () => {
+                if (!this.ready) {
+                    console.warn('[WhatsApp] ⚠️ Evento ready no recibido después de 120s tras autenticación. Reiniciando cliente para recuperar contexto...');
+                    try {
+                        await this.restart();
+                    } catch (err) {
+                        console.error('[WhatsApp] Error durante reinicio por timeout de ready:', err);
+                    }
+                }
+            }, 120000);
         });
 
         this.client.on('auth_failure', (msg) => {
             console.error('[WhatsApp] Error de autenticación:', msg);
+            if (this.readyTimeout) {
+                clearTimeout(this.readyTimeout);
+                this.readyTimeout = null;
+            }
             if (this.io) {
                 this.io.emit('whatsapp_status', { state: 'AUTHENTICATION_FAILED', message: msg });
             }
         });
 
         this.client.on('ready', async () => {
+            if (this.readyTimeout) {
+                clearTimeout(this.readyTimeout);
+                this.readyTimeout = null;
+            }
             console.log('[WhatsApp] Cliente listo (evento ready)');
             this.ready = true;
             this.invalidateGroupsCache();
@@ -177,6 +199,10 @@ class WhatsAppClient {
 
         this.client.on('disconnected', async (reason) => {
             console.log('[WhatsApp] Desconectado:', reason);
+            if (this.readyTimeout) {
+                clearTimeout(this.readyTimeout);
+                this.readyTimeout = null;
+            }
             this.ready = false;
             this.invalidateGroupsCache();
             this.syncSessionToShared(); // Sincronizar la desconexión
@@ -335,8 +361,9 @@ class WhatsAppClient {
                 await this.client.sendMessage(targetId, content, options);
                 return; // Éxito
             } catch (error: any) {
-                const shouldRetry = error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
-                    error.message?.includes("Cannot read properties of undefined (reading 'getChat')") ||
+                const isGetChatError = error.message?.includes("Cannot read properties of undefined (reading 'getChat')");
+                const shouldRetry = isGetChatError ||
+                    error.message?.includes("Cannot read properties of undefined (reading 'update')") ||
                     error.message?.includes("Promise was collected") ||
                     error.message?.includes("Session closed") ||
                     error.message?.includes("Target closed") ||
@@ -345,6 +372,21 @@ class WhatsAppClient {
                     error.message?.includes("Runtime.callFunctionOn");
 
                 if (shouldRetry && attempt < retries) {
+                    if (isGetChatError) {
+                        console.warn(`[WhatsApp] ⚠️ Detectada pérdida de contexto WWebJS en evaluate (intento ${attempt}/${retries}).`);
+                        try {
+                            const page = (this.client as any).pupPage;
+                            if (page && !page.isClosed()) {
+                                const hasWWebJS = await page.evaluate(() => typeof (window as any).WWebJS !== 'undefined').catch(() => false);
+                                if (!hasWWebJS && typeof (this.client as any).inject === 'function') {
+                                    console.warn('[WhatsApp] Contexto WWebJS ausente. Intentando reinyección defensiva...');
+                                    await (this.client as any).inject().catch(() => {});
+                                }
+                            }
+                        } catch (reinjectErr) {
+                            console.warn('[WhatsApp] No se pudo comprobar/reinyectar contexto:', reinjectErr);
+                        }
+                    }
                     const delay = attempt * config.send.retryBaseDelayMs;
                     console.log(`[WhatsApp] Reintentando envío a ${targetId} (${attempt}/${retries}) en ${delay / 1000}s por error: ${error.message}`);
                     await new Promise(r => setTimeout(r, delay));
@@ -709,6 +751,10 @@ class WhatsAppClient {
      */
     public async restart(): Promise<void> {
         console.log('[WhatsApp] Reiniciando cliente...');
+        if (this.readyTimeout) {
+            clearTimeout(this.readyTimeout);
+            this.readyTimeout = null;
+        }
         this.ready = false;
         this.invalidateGroupsCache();
         if (this.io) {
@@ -738,6 +784,10 @@ class WhatsAppClient {
      */
     public async logout(): Promise<void> {
         console.log('[WhatsApp] Cerrando sesión de WhatsApp...');
+        if (this.readyTimeout) {
+            clearTimeout(this.readyTimeout);
+            this.readyTimeout = null;
+        }
         this.ready = false;
         this.invalidateGroupsCache();
         if (this.io) {
@@ -772,6 +822,10 @@ class WhatsAppClient {
      */
     public async clearCacheAndRestart(): Promise<void> {
         console.log('[WhatsApp] Limpiando caché y reiniciando...');
+        if (this.readyTimeout) {
+            clearTimeout(this.readyTimeout);
+            this.readyTimeout = null;
+        }
         this.ready = false;
         this.invalidateGroupsCache();
         if (this.io) {
@@ -815,6 +869,10 @@ class WhatsAppClient {
      */
     public async destroy(): Promise<void> {
         console.log('[WhatsApp] Destruyendo cliente...');
+        if (this.readyTimeout) {
+            clearTimeout(this.readyTimeout);
+            this.readyTimeout = null;
+        }
         this.ready = false;
         this.invalidateGroupsCache();
         try {
