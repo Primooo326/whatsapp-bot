@@ -5,6 +5,7 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Build backend
 COPY package*.json ./
+COPY patches ./patches
 RUN npm install
 COPY . .
 RUN npm run build
@@ -28,6 +29,7 @@ RUN chmod +x install-deps.sh && ./install-deps.sh && rm install-deps.sh
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/frontend/front-wha-bot/dist ./frontend-dist
 COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/patches ./patches
 
 RUN npm install --production
 

@@ -1,0 +1,12 @@
+diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+index 540078a..f1fecf4 100644
+--- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
++++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+@@ -487,6 +487,7 @@ exports.LoadUtils = () => {
+         if (botOptions) {
+             delete message.canonicalUrl;
+         }
++        delete message.__x_id;
+ 
+         if (isChannel) {
+             const msg = new (window.require('WAWebCollections').Msg.modelClass)(
