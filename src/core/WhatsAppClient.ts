@@ -537,20 +537,30 @@ class WhatsAppClient {
         }
 
         try {
-            // Intento 1: Extracción directa de Store de WhatsApp Web (Ultra rápido y resistente a timeouts)
+            // Intento 1: Extracción directa de colecciones de WhatsApp Web (Ultra rápido y resistente a timeouts)
             // @ts-ignore
             const rawGroups = await (this.client as any).pupPage.evaluate(() => {
                 try {
                     // @ts-ignore
-                    const chats = window.Store?.Chat?.getModelsArray() || [];
+                    const ChatCollection = (window as any).require?.('WAWebCollections')?.Chat
+                        // @ts-ignore
+                        || (window as any).require?.('WAWebCollections')?.WAWebChatCollection
+                        // @ts-ignore
+                        || (window as any).Store?.Chat;
+
+                    const chats = ChatCollection?.getModelsArray ? ChatCollection.getModelsArray() : (ChatCollection?.models || []);
+
                     return chats
                         .filter((chat: any) => chat && (chat.isGroup || chat.id?._serialized?.includes('@g.us')))
                         .map((chat: any) => {
                             let participants: string[] = [];
-                            const rawParts = chat.groupMetadata?.participants || chat.participants || [];
+                            const rawParts = chat.groupMetadata?.participants
+                                || chat.groupMetadata?._models
+                                || chat.participants
+                                || [];
                             if (Array.isArray(rawParts)) {
                                 participants = rawParts
-                                    .map((p: any) => p?.id?.user || p?.id?._serialized?.split('@')[0] || p?.id || p?.user)
+                                    .map((p: any) => p?.id?.user || p?.id?._serialized?.split('@')[0] || (typeof p?.id === 'string' ? p.id.split('@')[0] : '') || p?.user)
                                     .filter((v: any) => typeof v === 'string' && v.length > 0);
                             }
                             return {
@@ -618,7 +628,14 @@ class WhatsAppClient {
             const rawChats = await (this.client as any).pupPage.evaluate(() => {
                 try {
                     // @ts-ignore
-                    const chats = window.Store?.Chat?.getModelsArray() || [];
+                    const ChatCollection = (window as any).require?.('WAWebCollections')?.Chat
+                        // @ts-ignore
+                        || (window as any).require?.('WAWebCollections')?.WAWebChatCollection
+                        // @ts-ignore
+                        || (window as any).Store?.Chat;
+
+                    const chats = ChatCollection?.getModelsArray ? ChatCollection.getModelsArray() : (ChatCollection?.models || []);
+
                     return chats
                         .filter((chat: any) => chat && !chat.isGroup && !chat.id?._serialized?.includes('@g.us') && !chat.id?._serialized?.includes('@newsletter'))
                         .map((chat: any) => {
@@ -632,7 +649,7 @@ class WhatsAppClient {
                 }
             });
 
-            if (rawChats && Array.isArray(rawChats)) {
+            if (rawChats && Array.isArray(rawChats) && rawChats.length > 0) {
                 return rawChats;
             }
         } catch (evalError) {
